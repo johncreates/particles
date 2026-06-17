@@ -39,6 +39,10 @@ canvas.addEventListener('touchend', () => {
 // ─── Gravity wells + shockwave ───────────────────────────────────────────
 let clickTimer = null;
 canvas.addEventListener('click', e => {
+  if (e.shiftKey) {
+    engine.addHotParticle(e.clientX, e.clientY);
+    return;
+  }
   clickTimer = setTimeout(() => {
     engine.toggleWell(e.clientX, e.clientY);
     clickTimer = null;

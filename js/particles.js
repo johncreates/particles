@@ -7,7 +7,7 @@ export class ParticleEngine {
     this.particles = [];
     this.blobPoints = [];
     this.wells = [];       // { x, y }  max 5
-    this.shockwaves = [];  // { x, y, r, maxR }
+    this.shockwaves = [];  // { x, y, t, duration, maxR }
     this.time = 0;
     this.mouse = { x: -9999, y: -9999, down: false };
 
@@ -27,19 +27,17 @@ export class ParticleEngine {
     window.addEventListener('resize', this._onResize);
   }
 
-  // ─── CSS pixel dimensions ─────────────────────────────────────────────────
   get _dpr() { return window.devicePixelRatio || 1; }
   get _W() { return window.innerWidth; }
   get _H() { return window.innerHeight; }
 
-  // ─── Cloud radius in CSS pixels ───────────────────────────────────────────
   cloudRadius() {
     const base = Math.min(this._W, this._H);
     const map = { S: 0.15, M: 0.25, L: 0.38, XL: 0.55 };
     return base * (map[this.config.cloudSize] ?? 0.25);
   }
 
-  // ─── Blob boundary (sum-of-sines radius noise) ───────────────────────────
+  // ─── Blob boundary ────────────────────────────────────────────────────────
   generateBlob() {
     const N = 64;
     const freqs = [
@@ -71,7 +69,7 @@ export class ParticleEngine {
     return dist < this.cloudRadius() * this._blobRadiusAt(angle);
   }
 
-  // ─── Spawn particles inside the blob ─────────────────────────────────────
+  // ─── Spawn particles ──────────────────────────────────────────────────────
   spawnParticles() {
     this.particles = [];
     const cx = this._W / 2;
@@ -95,6 +93,7 @@ export class ParticleEngine {
         phaseX: Math.random() * Math.PI * 2,
         phaseY: Math.random() * Math.PI * 2,
         size: this.config.particleSize,
+        hot: Math.random() < 0.025,
       });
     }
   }
@@ -104,6 +103,7 @@ export class ParticleEngine {
     const cy = this._H / 2;
     const r = this.cloudRadius();
     for (const p of this.particles) {
+      if (p.hot) continue;
       p.homeX = cx + p.ndx * r;
       p.homeY = cy + p.ndy * r;
       p.x = p.homeX;
@@ -154,6 +154,21 @@ export class ParticleEngine {
     this.shockwaves.push({ x, y, t: 0, duration: 1.8, maxR: this.cloudRadius() * 2.4 });
   }
 
+  addHotParticle(x, y) {
+    const hotCount = this.particles.filter(p => p.hot).length;
+    if (hotCount >= 20) return;
+    this.particles.push({
+      x, y,
+      homeX: x, homeY: y,
+      ndx: 0, ndy: 0,
+      vx: 0, vy: 0,
+      phaseX: Math.random() * Math.PI * 2,
+      phaseY: Math.random() * Math.PI * 2,
+      size: this.config.particleSize,
+      hot: true,
+    });
+  }
+
   // ─── Main update + draw ───────────────────────────────────────────────────
   tick(dt) {
     this.time += dt;
@@ -165,20 +180,26 @@ export class ParticleEngine {
 
     const idleStrength = (this.config.idleEnergy / 100) * 0.06;
     const reactivity = (this.config.reactivity / 100) * 5000;
-    const influenceR = this.cloudRadius() * 0.8;
-    const connectionThreshold = this.cloudRadius() * 0.48;
+    const cr = this.cloudRadius();
+    const influenceR = cr * 0.8;
+    const connectionThreshold = cr * 0.48;
     const friction = 0.88;
     const homeSpring = 0.004;
     const freq = 0.5;
     const wellStrength = 900;
-    const wellInfluence = this.cloudRadius() * 1.2;
+    const wellInfluence = cr * 1.2;
     const shockBand = 30;
+    const agitateR = 45;
 
     const mx = this.mouse.x;
     const my = this.mouse.y;
     const attractMode = this.mouse.down;
+    const cx = W / 2;
+    const cy = H / 2;
 
-    // ─── Advance shockwaves (ease-out expansion) ─────────────────────────
+    const hotParticles = this.particles.filter(p => p.hot);
+
+    // ─── Advance shockwaves ──────────────────────────────────────────────
     for (const s of this.shockwaves) {
       s.t = Math.min(s.t + dt, s.duration);
       const prog = s.t / s.duration;
@@ -187,15 +208,35 @@ export class ParticleEngine {
 
     // ─── Update particles ────────────────────────────────────────────────
     for (const p of this.particles) {
-      // Home spring
-      p.vx += (p.homeX - p.x) * homeSpring;
-      p.vy += (p.homeY - p.y) * homeSpring;
+      if (p.hot) {
+        // Wanderer: slow two-frequency sinuous drift, no home spring
+        const wAmp = idleStrength * 5;
+        p.vx += Math.sin(this.time * 0.09 + p.phaseX) * wAmp;
+        p.vy += Math.cos(this.time * 0.13 + p.phaseY) * wAmp;
+        // Loose tether so wanderers stay near the cloud area
+        const distC = Math.hypot(p.x - cx, p.y - cy);
+        if (distC > cr * 1.5) {
+          p.vx += (cx - p.x) * 0.002;
+          p.vy += (cy - p.y) * 0.002;
+        }
+      } else {
+        // Home spring
+        p.vx += (p.homeX - p.x) * homeSpring;
+        // Idle drift
+        p.vx += Math.sin(this.time * freq + p.phaseX) * idleStrength;
+        p.vy += Math.cos(this.time * freq + p.phaseY) * idleStrength;
+        // Agitation from nearby hot particles
+        for (const h of hotParticles) {
+          const hd = Math.hypot(p.x - h.x, p.y - h.y);
+          if (hd < agitateR) {
+            const boost = (1 - hd / agitateR) * 4;
+            p.vx += Math.sin(this.time * freq * 2.5 + p.phaseX + h.phaseX) * idleStrength * boost;
+            p.vy += Math.cos(this.time * freq * 2.5 + p.phaseY + h.phaseY) * idleStrength * boost;
+          }
+        }
+      }
 
-      // Idle drift
-      p.vx += Math.sin(this.time * freq + p.phaseX) * idleStrength;
-      p.vy += Math.cos(this.time * freq + p.phaseY) * idleStrength;
-
-      // Cursor force
+      // Cursor force (all particles)
       const ddx = p.x - mx;
       const ddy = p.y - my;
       const dist = Math.hypot(ddx, ddy) || 0.001;
@@ -206,20 +247,20 @@ export class ParticleEngine {
         p.vy += sign * (ddy / dist) * force;
       }
 
-      // Gravity wells
+      // Gravity wells (all particles)
       for (const w of this.wells) {
         const wdx = w.x - p.x;
         const wdy = w.y - p.y;
         const wd = Math.hypot(wdx, wdy) || 0.001;
         if (wd < wellInfluence) {
-          const effD = Math.max(wd, 22); // prevent infinite suck-in
+          const effD = Math.max(wd, 22);
           const f = Math.min(wellStrength / (effD * effD), 1.8);
           p.vx += (wdx / wd) * f;
           p.vy += (wdy / wd) * f;
         }
       }
 
-      // Shockwave impulse
+      // Shockwave impulse (all particles)
       for (const s of this.shockwaves) {
         const sd = Math.hypot(p.x - s.x, p.y - s.y) || 0.001;
         const gap = Math.abs(sd - s.r);
@@ -238,14 +279,12 @@ export class ParticleEngine {
       p.y += p.vy;
     }
 
-    // Remove spent shockwaves
     this.shockwaves = this.shockwaves.filter(s => s.t < s.duration);
 
     // ─── Draw shockwaves ─────────────────────────────────────────────────
     for (const s of this.shockwaves) {
       const progress = s.t / s.duration;
 
-      // Origin flash (first 0.15s)
       const flashAlpha = Math.max(0, 1 - s.t / 0.15) * 0.5;
       if (flashAlpha > 0) {
         ctx.beginPath();
@@ -254,7 +293,6 @@ export class ParticleEngine {
         ctx.fill();
       }
 
-      // Inner glow ring
       if (s.r > 6) {
         const innerAlpha = (1 - progress) * 0.2;
         ctx.beginPath();
@@ -264,7 +302,6 @@ export class ParticleEngine {
         ctx.stroke();
       }
 
-      // Outer ring
       const alpha = (1 - progress) * 0.55;
       ctx.beginPath();
       ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
@@ -281,22 +318,36 @@ export class ParticleEngine {
       for (let j = i + 1; j < n; j++) {
         const b = pts[j];
         const d = Math.hypot(a.x - b.x, a.y - b.y);
-        if (d >= connectionThreshold) continue;
-        const alpha = (1 - d / connectionThreshold) * 0.5;
+        const isHot = a.hot || b.hot;
+        const threshold = isHot ? connectionThreshold * 1.9 : connectionThreshold;
+        if (d >= threshold) continue;
+        const alpha = (1 - d / threshold) * (isHot ? 0.35 : 0.5);
         ctx.beginPath();
         ctx.moveTo(a.x, a.y);
         ctx.lineTo(b.x, b.y);
-        ctx.strokeStyle = `rgba(196,184,168,${alpha.toFixed(3)})`;
+        ctx.strokeStyle = isHot
+          ? `rgba(220,130,70,${alpha.toFixed(3)})`
+          : `rgba(196,184,168,${alpha.toFixed(3)})`;
         ctx.lineWidth = 0.5;
         ctx.stroke();
       }
     }
 
-    // ─── Draw particles ──────────────────────────────────────────────────
+    // ─── Draw grey particles ─────────────────────────────────────────────
     ctx.fillStyle = '#c4b8a8';
     for (const p of this.particles) {
+      if (p.hot) continue;
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ─── Draw hot particles (on top, slightly larger) ────────────────────
+    ctx.fillStyle = '#E8631A';
+    for (const p of this.particles) {
+      if (!p.hot) continue;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size + 1, 0, Math.PI * 2);
       ctx.fill();
     }
 
@@ -305,7 +356,6 @@ export class ParticleEngine {
     const pingT = 1.4;
 
     for (const w of this.wells) {
-      // Two staggered sonar-ping rings
       for (let i = 0; i < 2; i++) {
         const phase = ((this.time + i * pingT / 2) % pingT) / pingT;
         const r = phase * pingR;
@@ -317,7 +367,6 @@ export class ParticleEngine {
         ctx.stroke();
       }
 
-      // Crosshair
       const arm = 9;
       ctx.strokeStyle = 'rgba(196,184,168,0.65)';
       ctx.lineWidth = 0.9;
@@ -326,7 +375,6 @@ export class ParticleEngine {
       ctx.moveTo(w.x, w.y - arm); ctx.lineTo(w.x, w.y + arm);
       ctx.stroke();
 
-      // Center dot (drawn last, on top)
       ctx.beginPath();
       ctx.arc(w.x, w.y, 2.5, 0, Math.PI * 2);
       ctx.fillStyle = 'rgba(196,184,168,0.75)';
