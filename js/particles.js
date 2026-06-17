@@ -274,6 +274,70 @@ export class ParticleEngine {
 
     this.shockwaves = this.shockwaves.filter(s => s.t < s.duration);
 
+    // ─── Draw low-poly quad fills ─────────────────────────────────────────
+    {
+      const { cols, rows } = this._gridParams();
+      const distThreshold = Math.max(spacingX, spacingY) * 0.55;
+
+      // Particle lookup by grid position
+      const gmap = new Map();
+      for (const p of this.particles) {
+        if (!p.hot) gmap.set(p.col * 10000 + p.row, p);
+      }
+
+      const settle = p => Math.max(0, 1 - Math.hypot(p.x - p.homeX, p.y - p.homeY) / distThreshold);
+
+      // Pass 1: compute quad settledness
+      const qs = new Float32Array(cols * rows);
+      for (let row = 0; row < rows - 1; row++) {
+        for (let col = 0; col < cols - 1; col++) {
+          const a = gmap.get(col * 10000 + row);
+          const b = gmap.get((col + 1) * 10000 + row);
+          const c = gmap.get(col * 10000 + (row + 1));
+          const d = gmap.get((col + 1) * 10000 + (row + 1));
+          if (!a || !b || !c || !d) continue;
+          qs[row * cols + col] = Math.min(settle(a), settle(b), settle(c), settle(d));
+        }
+      }
+
+      // Pass 2: draw quads, brightened by settled neighbors
+      for (let row = 0; row < rows - 1; row++) {
+        for (let col = 0; col < cols - 1; col++) {
+          const quadS = qs[row * cols + col];
+          if (quadS < 0.02) continue;
+
+          let neighborSum = 0, neighborCount = 0;
+          for (let dr = -1; dr <= 1; dr++) {
+            for (let dc = -1; dc <= 1; dc++) {
+              if (dr === 0 && dc === 0) continue;
+              const nr = row + dr, nc = col + dc;
+              if (nr >= 0 && nr < rows - 1 && nc >= 0 && nc < cols - 1) {
+                neighborSum += qs[nr * cols + nc];
+                neighborCount++;
+              }
+            }
+          }
+          const neighborAvg = neighborCount > 0 ? neighborSum / neighborCount : 0;
+          const boost = 1 + neighborAvg * 1.8;
+          const alpha = Math.min(quadS * 0.05 * boost, 0.13);
+
+          const a = gmap.get(col * 10000 + row);
+          const b = gmap.get((col + 1) * 10000 + row);
+          const c = gmap.get(col * 10000 + (row + 1));
+          const d = gmap.get((col + 1) * 10000 + (row + 1));
+
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.lineTo(d.x, d.y);
+          ctx.lineTo(c.x, c.y);
+          ctx.closePath();
+          ctx.fillStyle = `rgba(196,184,168,${alpha.toFixed(3)})`;
+          ctx.fill();
+        }
+      }
+    }
+
     // ─── Draw shockwaves ─────────────────────────────────────────────────
     for (const s of this.shockwaves) {
       const progress = s.t / s.duration;
@@ -346,10 +410,14 @@ export class ParticleEngine {
     }
 
     // ─── Draw gravity wells ──────────────────────────────────────────────
-    const pingR = 55;
     const pingT = 1.4;
 
     for (const w of this.wells) {
+      // Scale 1× (10s well) → 4× (60s well)
+      const scale = 1 + 3 * Math.max(0, (w.lifespan - 10) / 50);
+      const wPingR = 55 * scale;
+      const arm = 9 * scale;
+
       // deathFrac: 0 until last 30% of life, then ramps to 1
       const lifeProg = w.age / w.lifespan;
       const deathFrac = Math.max(0, (lifeProg - 0.7) / 0.3);
@@ -360,7 +428,7 @@ export class ParticleEngine {
 
       for (let i = 0; i < 2; i++) {
         const phase = ((this.time + i * pingT / 2) % pingT) / pingT;
-        const r = phase * pingR;
+        const r = phase * wPingR;
         const alpha = (1 - phase) * 0.28;
         ctx.beginPath();
         ctx.arc(w.x, w.y, r, 0, Math.PI * 2);
@@ -369,7 +437,6 @@ export class ParticleEngine {
         ctx.stroke();
       }
 
-      const arm = 9;
       ctx.strokeStyle = `rgba(${cr},${cg},${cb},0.65)`;
       ctx.lineWidth = 0.9;
       ctx.beginPath();
@@ -378,7 +445,7 @@ export class ParticleEngine {
       ctx.stroke();
 
       ctx.beginPath();
-      ctx.arc(w.x, w.y, 2.5, 0, Math.PI * 2);
+      ctx.arc(w.x, w.y, 2.5 * scale, 0, Math.PI * 2);
       ctx.fillStyle = `rgba(${cr},${cg},${cb},0.75)`;
       ctx.fill();
     }
