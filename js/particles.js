@@ -151,7 +151,7 @@ export class ParticleEngine {
   }
 
   addShockwave(x, y) {
-    this.shockwaves.push({ x, y, r: 0, maxR: this.cloudRadius() * 2.2 });
+    this.shockwaves.push({ x, y, t: 0, duration: 1.8, maxR: this.cloudRadius() * 2.4 });
   }
 
   // ─── Main update + draw ───────────────────────────────────────────────────
@@ -172,16 +172,17 @@ export class ParticleEngine {
     const freq = 0.5;
     const wellStrength = 900;
     const wellInfluence = this.cloudRadius() * 1.2;
-    const shockSpeed = 320;
     const shockBand = 30;
 
     const mx = this.mouse.x;
     const my = this.mouse.y;
     const attractMode = this.mouse.down;
 
-    // ─── Expand shockwaves ───────────────────────────────────────────────
+    // ─── Advance shockwaves (ease-out expansion) ─────────────────────────
     for (const s of this.shockwaves) {
-      s.r += shockSpeed * dt;
+      s.t = Math.min(s.t + dt, s.duration);
+      const prog = s.t / s.duration;
+      s.r = s.maxR * (1 - Math.pow(1 - prog, 2.5));
     }
 
     // ─── Update particles ────────────────────────────────────────────────
@@ -238,16 +239,37 @@ export class ParticleEngine {
     }
 
     // Remove spent shockwaves
-    this.shockwaves = this.shockwaves.filter(s => s.r < s.maxR);
+    this.shockwaves = this.shockwaves.filter(s => s.t < s.duration);
 
     // ─── Draw shockwaves ─────────────────────────────────────────────────
     for (const s of this.shockwaves) {
-      const progress = s.r / s.maxR;
-      const alpha = (1 - progress) * 0.6;
+      const progress = s.t / s.duration;
+
+      // Origin flash (first 0.15s)
+      const flashAlpha = Math.max(0, 1 - s.t / 0.15) * 0.5;
+      if (flashAlpha > 0) {
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, 6, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(196,184,168,${flashAlpha.toFixed(2)})`;
+        ctx.fill();
+      }
+
+      // Inner glow ring
+      if (s.r > 6) {
+        const innerAlpha = (1 - progress) * 0.2;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.r * 0.82, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(196,184,168,${innerAlpha.toFixed(2)})`;
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      }
+
+      // Outer ring
+      const alpha = (1 - progress) * 0.55;
       ctx.beginPath();
       ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
       ctx.strokeStyle = `rgba(196,184,168,${alpha.toFixed(2)})`;
-      ctx.lineWidth = 1.5 * (1 - progress);
+      ctx.lineWidth = 1.2;
       ctx.stroke();
     }
 
@@ -279,24 +301,36 @@ export class ParticleEngine {
     }
 
     // ─── Draw gravity wells ──────────────────────────────────────────────
-    for (const w of this.wells) {
-      const pr = 8 + Math.sin(this.time * 3) * 3;
+    const pingR = 55;
+    const pingT = 1.4;
 
-      // Pulsing ring
-      ctx.beginPath();
-      ctx.arc(w.x, w.y, pr, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(196,184,168,0.3)';
-      ctx.lineWidth = 0.8;
-      ctx.stroke();
+    for (const w of this.wells) {
+      // Two staggered sonar-ping rings
+      for (let i = 0; i < 2; i++) {
+        const phase = ((this.time + i * pingT / 2) % pingT) / pingT;
+        const r = phase * pingR;
+        const alpha = (1 - phase) * 0.28;
+        ctx.beginPath();
+        ctx.arc(w.x, w.y, r, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(196,184,168,${alpha.toFixed(2)})`;
+        ctx.lineWidth = 0.7;
+        ctx.stroke();
+      }
 
       // Crosshair
-      const arm = 5;
-      ctx.strokeStyle = 'rgba(196,184,168,0.55)';
-      ctx.lineWidth = 0.8;
+      const arm = 9;
+      ctx.strokeStyle = 'rgba(196,184,168,0.65)';
+      ctx.lineWidth = 0.9;
       ctx.beginPath();
       ctx.moveTo(w.x - arm, w.y); ctx.lineTo(w.x + arm, w.y);
       ctx.moveTo(w.x, w.y - arm); ctx.lineTo(w.x, w.y + arm);
       ctx.stroke();
+
+      // Center dot (drawn last, on top)
+      ctx.beginPath();
+      ctx.arc(w.x, w.y, 2.5, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(196,184,168,0.75)';
+      ctx.fill();
     }
   }
 
