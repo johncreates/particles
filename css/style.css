@@ -202,3 +202,17 @@ input[type="range"]::-moz-range-thumb {
 #reroll-btn:active {
   background: rgba(196, 184, 168, 0.2);
 }
+
+/* Hint bar */
+#hint {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: rgba(196, 184, 168, 0.3);
+  letter-spacing: 0.04em;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 10;
+}

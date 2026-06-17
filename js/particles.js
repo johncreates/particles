@@ -6,6 +6,8 @@ export class ParticleEngine {
     this.ctx = canvas.getContext('2d');
     this.particles = [];
     this.blobPoints = [];
+    this.wells = [];       // { x, y }  max 5
+    this.shockwaves = [];  // { x, y, r, maxR }
     this.time = 0;
     this.mouse = { x: -9999, y: -9999, down: false };
 
@@ -84,9 +86,9 @@ export class ParticleEngine {
       this.particles.push({
         x: cx + dx,
         y: cy + dy,
-        homeX: cx + dx,  // fixed spawn position for home spring
+        homeX: cx + dx,
         homeY: cy + dy,
-        ndx: dx / r,     // normalized, survives cloud resize
+        ndx: dx / r,
         ndy: dy / r,
         vx: 0,
         vy: 0,
@@ -97,7 +99,6 @@ export class ParticleEngine {
     }
   }
 
-  // ─── Rebuild home positions after cloud size or viewport change ───────────
   _rehome() {
     const cx = this._W / 2;
     const cy = this._H / 2;
@@ -140,6 +141,19 @@ export class ParticleEngine {
     this.spawnParticles();
   }
 
+  toggleWell(x, y) {
+    const hitIdx = this.wells.findIndex(w => Math.hypot(w.x - x, w.y - y) < 28);
+    if (hitIdx !== -1) {
+      this.wells.splice(hitIdx, 1);
+    } else if (this.wells.length < 5) {
+      this.wells.push({ x, y });
+    }
+  }
+
+  addShockwave(x, y) {
+    this.shockwaves.push({ x, y, r: 0, maxR: this.cloudRadius() * 2.2 });
+  }
+
   // ─── Main update + draw ───────────────────────────────────────────────────
   tick(dt) {
     this.time += dt;
@@ -154,21 +168,29 @@ export class ParticleEngine {
     const influenceR = this.cloudRadius() * 0.8;
     const connectionThreshold = this.cloudRadius() * 0.48;
     const friction = 0.88;
-    const homeSpring = 0.004; // gentle pull back toward spawn position
+    const homeSpring = 0.004;
     const freq = 0.5;
+    const wellStrength = 900;
+    const wellInfluence = this.cloudRadius() * 1.2;
+    const shockSpeed = 320;
+    const shockBand = 30;
 
     const mx = this.mouse.x;
     const my = this.mouse.y;
     const attractMode = this.mouse.down;
-    const cx = W / 2;
-    const cy = H / 2;
 
+    // ─── Expand shockwaves ───────────────────────────────────────────────
+    for (const s of this.shockwaves) {
+      s.r += shockSpeed * dt;
+    }
+
+    // ─── Update particles ────────────────────────────────────────────────
     for (const p of this.particles) {
-      // Home spring — keeps the cloud shape intact
+      // Home spring
       p.vx += (p.homeX - p.x) * homeSpring;
       p.vy += (p.homeY - p.y) * homeSpring;
 
-      // Idle drift (oscillates around home)
+      // Idle drift
       p.vx += Math.sin(this.time * freq + p.phaseX) * idleStrength;
       p.vy += Math.cos(this.time * freq + p.phaseY) * idleStrength;
 
@@ -183,11 +205,50 @@ export class ParticleEngine {
         p.vy += sign * (ddy / dist) * force;
       }
 
+      // Gravity wells
+      for (const w of this.wells) {
+        const wdx = w.x - p.x;
+        const wdy = w.y - p.y;
+        const wd = Math.hypot(wdx, wdy) || 0.001;
+        if (wd < wellInfluence) {
+          const effD = Math.max(wd, 22); // prevent infinite suck-in
+          const f = Math.min(wellStrength / (effD * effD), 1.8);
+          p.vx += (wdx / wd) * f;
+          p.vy += (wdy / wd) * f;
+        }
+      }
+
+      // Shockwave impulse
+      for (const s of this.shockwaves) {
+        const sd = Math.hypot(p.x - s.x, p.y - s.y) || 0.001;
+        const gap = Math.abs(sd - s.r);
+        if (gap < shockBand) {
+          const falloff = 1 - gap / shockBand;
+          const force = 4000 * falloff;
+          p.vx += ((p.x - s.x) / sd) * force * dt;
+          p.vy += ((p.y - s.y) / sd) * force * dt;
+        }
+      }
+
       // Friction + integrate
       p.vx *= friction;
       p.vy *= friction;
       p.x += p.vx;
       p.y += p.vy;
+    }
+
+    // Remove spent shockwaves
+    this.shockwaves = this.shockwaves.filter(s => s.r < s.maxR);
+
+    // ─── Draw shockwaves ─────────────────────────────────────────────────
+    for (const s of this.shockwaves) {
+      const progress = s.r / s.maxR;
+      const alpha = (1 - progress) * 0.6;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(196,184,168,${alpha.toFixed(2)})`;
+      ctx.lineWidth = 1.5 * (1 - progress);
+      ctx.stroke();
     }
 
     // ─── Draw connections ────────────────────────────────────────────────
@@ -215,6 +276,27 @@ export class ParticleEngine {
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
       ctx.fill();
+    }
+
+    // ─── Draw gravity wells ──────────────────────────────────────────────
+    for (const w of this.wells) {
+      const pr = 8 + Math.sin(this.time * 3) * 3;
+
+      // Pulsing ring
+      ctx.beginPath();
+      ctx.arc(w.x, w.y, pr, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(196,184,168,0.3)';
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+
+      // Crosshair
+      const arm = 5;
+      ctx.strokeStyle = 'rgba(196,184,168,0.55)';
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.moveTo(w.x - arm, w.y); ctx.lineTo(w.x + arm, w.y);
+      ctx.moveTo(w.x, w.y - arm); ctx.lineTo(w.x, w.y + arm);
+      ctx.stroke();
     }
   }
 

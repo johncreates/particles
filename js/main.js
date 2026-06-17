@@ -36,6 +36,20 @@ canvas.addEventListener('touchend', () => {
   engine.mouse.y = -9999;
 });
 
+// ─── Gravity wells + shockwave ───────────────────────────────────────────
+let clickTimer = null;
+canvas.addEventListener('click', e => {
+  clickTimer = setTimeout(() => {
+    engine.toggleWell(e.clientX, e.clientY);
+    clickTimer = null;
+  }, 220);
+});
+canvas.addEventListener('dblclick', e => {
+  clearTimeout(clickTimer);
+  clickTimer = null;
+  engine.addShockwave(e.clientX, e.clientY);
+});
+
 // ─── Settings ────────────────────────────────────────────────────────────
 initSettings((key, value) => {
   if (key === 'reroll') {
