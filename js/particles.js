@@ -11,11 +11,11 @@ export class ParticleEngine {
     this.mouse = { x: -9999, y: -9999, down: false };
 
     this.config = {
-      count: 300,
+      count: 400,
       particleSize: 2,
-      reactivity: 40,
-      idleEnergy: 25,
-      cloudSize: 'M',
+      reactivity: 50,
+      idleEnergy: 5,
+      cloudSize: 'S',
     };
 
     // Default wave: left-to-right
@@ -122,7 +122,7 @@ export class ParticleEngine {
     if (hitIdx !== -1) {
       this.wells.splice(hitIdx, 1);
     } else if (this.wells.length < 5) {
-      this.wells.push({ x, y });
+      this.wells.push({ x, y, age: 0, lifespan: 10 + Math.random() * 50 });
     }
   }
 
@@ -174,6 +174,19 @@ export class ParticleEngine {
     const attractMode = this.mouse.down;
 
     const hotParticles = this.particles.filter(p => p.hot);
+
+    // ─── Advance + expire gravity wells ─────────────────────────────────
+    const dyingWells = [];
+    for (const w of this.wells) {
+      w.age += dt;
+      if (w.age >= w.lifespan) dyingWells.push(w);
+    }
+    for (const w of dyingWells) {
+      const sizeFrac = w.lifespan / 60;
+      const maxR = Math.max(W, H) * (0.35 + 0.4 * sizeFrac);
+      this.shockwaves.push({ x: w.x, y: w.y, t: 0, duration: 1.8 + sizeFrac * 0.6, maxR });
+    }
+    this.wells = this.wells.filter(w => w.age < w.lifespan);
 
     // ─── Advance shockwaves ──────────────────────────────────────────────
     for (const s of this.shockwaves) {
@@ -302,7 +315,8 @@ export class ParticleEngine {
         const isHot = a.hot || b.hot;
         const threshold = isHot ? connectionThreshold * 1.9 : connectionThreshold;
         if (d >= threshold) continue;
-        const alpha = (1 - d / threshold) * (isHot ? 0.35 : 0.5);
+        const flicker = 0.55 + 0.45 * Math.sin(this.time * 6.5 + a.phaseX + b.phaseX);
+        const alpha = (1 - d / threshold) * (isHot ? 0.35 : 0.5) * flicker;
         ctx.beginPath();
         ctx.moveTo(a.x, a.y);
         ctx.lineTo(b.x, b.y);
@@ -337,19 +351,27 @@ export class ParticleEngine {
     const pingT = 1.4;
 
     for (const w of this.wells) {
+      // deathFrac: 0 until last 30% of life, then ramps to 1
+      const lifeProg = w.age / w.lifespan;
+      const deathFrac = Math.max(0, (lifeProg - 0.7) / 0.3);
+      // Interpolate grey → red
+      const cr = Math.round(196 + deathFrac * (220 - 196));
+      const cg = Math.round(184 + deathFrac * (55 - 184));
+      const cb = Math.round(168 + deathFrac * (55 - 168));
+
       for (let i = 0; i < 2; i++) {
         const phase = ((this.time + i * pingT / 2) % pingT) / pingT;
         const r = phase * pingR;
         const alpha = (1 - phase) * 0.28;
         ctx.beginPath();
         ctx.arc(w.x, w.y, r, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(196,184,168,${alpha.toFixed(2)})`;
+        ctx.strokeStyle = `rgba(${cr},${cg},${cb},${alpha.toFixed(2)})`;
         ctx.lineWidth = 0.7;
         ctx.stroke();
       }
 
       const arm = 9;
-      ctx.strokeStyle = 'rgba(196,184,168,0.65)';
+      ctx.strokeStyle = `rgba(${cr},${cg},${cb},0.65)`;
       ctx.lineWidth = 0.9;
       ctx.beginPath();
       ctx.moveTo(w.x - arm, w.y); ctx.lineTo(w.x + arm, w.y);
@@ -358,7 +380,7 @@ export class ParticleEngine {
 
       ctx.beginPath();
       ctx.arc(w.x, w.y, 2.5, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(196,184,168,0.75)';
+      ctx.fillStyle = `rgba(${cr},${cg},${cb},0.75)`;
       ctx.fill();
     }
   }
