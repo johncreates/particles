@@ -5,7 +5,6 @@ export class ParticleEngine {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.particles = [];
-    this.blobPoints = [];
     this.wells = [];       // { x, y }  max 5
     this.shockwaves = [];  // { x, y, t, duration, maxR }
     this.time = 0;
@@ -19,8 +18,10 @@ export class ParticleEngine {
       cloudSize: 'M',
     };
 
+    // Default wave: left-to-right
+    this._wave = { kX: 0.6, kY: 0.0, sX: 1.2, sY: 0.0 };
+
     this._resize();
-    this.generateBlob();
     this.spawnParticles();
 
     this._onResize = this._resize.bind(this);
@@ -31,81 +32,50 @@ export class ParticleEngine {
   get _W() { return window.innerWidth; }
   get _H() { return window.innerHeight; }
 
-  cloudRadius() {
-    const base = Math.min(this._W, this._H);
-    const map = { S: 0.15, M: 0.25, L: 0.38, XL: 0.55 };
-    return base * (map[this.config.cloudSize] ?? 0.25);
+  // ─── Grid geometry ────────────────────────────────────────────────────────
+  _gridParams() {
+    const W = this._W, H = this._H;
+    const marginFrac = { S: 0.25, M: 0.15, L: 0.07, XL: 0.02 }[this.config.cloudSize] ?? 0.15;
+    const marginX = W * marginFrac;
+    const marginY = H * marginFrac;
+    const gridW = W - 2 * marginX;
+    const gridH = H - 2 * marginY;
+    const cols = Math.max(2, Math.round(Math.sqrt(this.config.count * (gridW / gridH))));
+    const rows = Math.max(2, Math.round(this.config.count / cols));
+    const spacingX = gridW / Math.max(cols - 1, 1);
+    const spacingY = gridH / Math.max(rows - 1, 1);
+    return { cols, rows, spacingX, spacingY, marginX, marginY };
   }
 
-  // ─── Blob boundary ────────────────────────────────────────────────────────
-  generateBlob() {
-    const N = 64;
-    const freqs = [
-      { f: 2, a: 0.12, p: Math.random() * Math.PI * 2 },
-      { f: 3, a: 0.08, p: Math.random() * Math.PI * 2 },
-      { f: 5, a: 0.05, p: Math.random() * Math.PI * 2 },
-      { f: 7, a: 0.03, p: Math.random() * Math.PI * 2 },
-    ];
-    this.blobPoints = Array.from({ length: N }, (_, i) => {
-      const angle = (i / N) * Math.PI * 2;
-      const noise = freqs.reduce((s, { f, a, p }) => s + Math.sin(f * angle + p) * a, 0);
-      return { angle, r: 1 + noise };
-    });
-  }
-
-  _blobRadiusAt(angle) {
-    const N = this.blobPoints.length;
-    const normalized = ((angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
-    const fi = (normalized / (Math.PI * 2)) * N;
-    const i0 = Math.floor(fi) % N;
-    const i1 = (i0 + 1) % N;
-    const t = fi - Math.floor(fi);
-    return this.blobPoints[i0].r * (1 - t) + this.blobPoints[i1].r * t;
-  }
-
-  _insideBlob(dx, dy) {
-    const angle = Math.atan2(dy, dx);
-    const dist = Math.hypot(dx, dy);
-    return dist < this.cloudRadius() * this._blobRadiusAt(angle);
-  }
-
-  // ─── Spawn particles ──────────────────────────────────────────────────────
+  // ─── Spawn particles on grid ──────────────────────────────────────────────
   spawnParticles() {
     this.particles = [];
-    const cx = this._W / 2;
-    const cy = this._H / 2;
-    const r = this.cloudRadius();
-    let attempts = 0;
-    while (this.particles.length < this.config.count && attempts < this.config.count * 20) {
-      attempts++;
-      const dx = (Math.random() * 2 - 1) * r * 1.1;
-      const dy = (Math.random() * 2 - 1) * r * 1.1;
-      if (!this._insideBlob(dx, dy)) continue;
-      this.particles.push({
-        x: cx + dx,
-        y: cy + dy,
-        homeX: cx + dx,
-        homeY: cy + dy,
-        ndx: dx / r,
-        ndy: dy / r,
-        vx: 0,
-        vy: 0,
-        phaseX: Math.random() * Math.PI * 2,
-        phaseY: Math.random() * Math.PI * 2,
-        size: this.config.particleSize,
-        hot: Math.random() < 0.025,
-      });
+    const { cols, rows, spacingX, spacingY, marginX, marginY } = this._gridParams();
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        const x = marginX + col * spacingX;
+        const y = marginY + row * spacingY;
+        this.particles.push({
+          x, y,
+          homeX: x, homeY: y,
+          col, row,
+          vx: 0, vy: 0,
+          phaseX: Math.random() * Math.PI * 2,
+          phaseY: Math.random() * Math.PI * 2,
+          size: this.config.particleSize,
+          hot: Math.random() < 0.025,
+        });
+      }
     }
   }
 
+  // ─── Recompute home positions (resize / grid size change) ─────────────────
   _rehome() {
-    const cx = this._W / 2;
-    const cy = this._H / 2;
-    const r = this.cloudRadius();
+    const { spacingX, spacingY, marginX, marginY } = this._gridParams();
     for (const p of this.particles) {
       if (p.hot) continue;
-      p.homeX = cx + p.ndx * r;
-      p.homeY = cy + p.ndy * r;
+      p.homeX = marginX + p.col * spacingX;
+      p.homeY = marginY + p.row * spacingY;
       p.x = p.homeX;
       p.y = p.homeY;
       p.vx = 0;
@@ -137,8 +107,14 @@ export class ParticleEngine {
   }
 
   rerollBlob() {
-    this.generateBlob();
-    this.spawnParticles();
+    const dirs = [
+      { kX: 0.6, kY: 0.0,  sX: 1.2, sY: 0.0  }, // left-to-right
+      { kX: 0.0, kY: 0.6,  sX: 0.0, sY: 1.2  }, // top-to-bottom
+      { kX: 0.5, kY: 0.5,  sX: 1.0, sY: 1.0  }, // diagonal ↘
+      { kX: 0.5, kY: -0.5, sX: 1.0, sY: -1.0 }, // diagonal ↗
+      { kX: 0.7, kY: 0.25, sX: 1.1, sY: 0.4  }, // oblique
+    ];
+    this._wave = dirs[Math.floor(Math.random() * dirs.length)];
   }
 
   toggleWell(x, y) {
@@ -151,7 +127,9 @@ export class ParticleEngine {
   }
 
   addShockwave(x, y) {
-    this.shockwaves.push({ x, y, t: 0, duration: 1.8, maxR: this.cloudRadius() * 2.4 });
+    const { spacingX, spacingY } = this._gridParams();
+    const maxR = Math.max(this._W, this._H) * 0.75;
+    this.shockwaves.push({ x, y, t: 0, duration: 1.8, maxR });
   }
 
   addHotParticle(x, y) {
@@ -160,7 +138,7 @@ export class ParticleEngine {
     this.particles.push({
       x, y,
       homeX: x, homeY: y,
-      ndx: 0, ndy: 0,
+      col: 0, row: 0,
       vx: 0, vy: 0,
       phaseX: Math.random() * Math.PI * 2,
       phaseY: Math.random() * Math.PI * 2,
@@ -180,22 +158,20 @@ export class ParticleEngine {
 
     const idleStrength = (this.config.idleEnergy / 100) * 0.06;
     const reactivity = (this.config.reactivity / 100) * 5000;
-    const cr = this.cloudRadius();
-    const influenceR = cr * 0.8;
-    const connectionThreshold = cr * 0.48;
+    const influenceR = Math.min(W, H) * 0.18;
     const friction = 0.88;
     const homeSpring = 0.004;
-    const freq = 0.5;
     const wellStrength = 900;
-    const wellInfluence = cr * 1.2;
     const shockBand = 30;
     const agitateR = 45;
+
+    const { spacingX, spacingY } = this._gridParams();
+    const connectionThreshold = Math.max(spacingX, spacingY) * 1.55;
+    const wellInfluence = Math.min(W, H) * 0.22;
 
     const mx = this.mouse.x;
     const my = this.mouse.y;
     const attractMode = this.mouse.down;
-    const cx = W / 2;
-    const cy = H / 2;
 
     const hotParticles = this.particles.filter(p => p.hot);
 
@@ -213,25 +189,31 @@ export class ParticleEngine {
         const wAmp = idleStrength * 5;
         p.vx += Math.sin(this.time * 0.09 + p.phaseX) * wAmp;
         p.vy += Math.cos(this.time * 0.13 + p.phaseY) * wAmp;
-        // Loose tether so wanderers stay near the cloud area
-        const distC = Math.hypot(p.x - cx, p.y - cy);
-        if (distC > cr * 1.5) {
-          p.vx += (cx - p.x) * 0.002;
-          p.vy += (cy - p.y) * 0.002;
+        // Loose tether to keep wanderers visible on screen
+        const distC = Math.hypot(p.x - W / 2, p.y - H / 2);
+        if (distC > Math.min(W, H) * 0.48) {
+          p.vx += (W / 2 - p.x) * 0.002;
+          p.vy += (H / 2 - p.y) * 0.002;
         }
       } else {
-        // Home spring
+        // Home spring — snaps particle back to grid position
         p.vx += (p.homeX - p.x) * homeSpring;
-        // Idle drift
-        p.vx += Math.sin(this.time * freq + p.phaseX) * idleStrength;
-        p.vy += Math.cos(this.time * freq + p.phaseY) * idleStrength;
+        p.vy += (p.homeY - p.y) * homeSpring;
+
+        // Traveling wave idle
+        const wavePhase = p.col * this._wave.kX + p.row * this._wave.kY
+                        - this.time * (this._wave.sX + this._wave.sY);
+        const waveAmp = idleStrength * 3;
+        p.vy += Math.sin(wavePhase) * waveAmp;
+        p.vx += Math.sin(wavePhase + 0.6) * waveAmp * 0.25;
+
         // Agitation from nearby hot particles
         for (const h of hotParticles) {
           const hd = Math.hypot(p.x - h.x, p.y - h.y);
           if (hd < agitateR) {
             const boost = (1 - hd / agitateR) * 4;
-            p.vx += Math.sin(this.time * freq * 2.5 + p.phaseX + h.phaseX) * idleStrength * boost;
-            p.vy += Math.cos(this.time * freq * 2.5 + p.phaseY + h.phaseY) * idleStrength * boost;
+            p.vx += Math.sin(this.time * 1.25 + p.phaseX + h.phaseX) * idleStrength * boost;
+            p.vy += Math.cos(this.time * 1.25 + p.phaseY + h.phaseY) * idleStrength * boost;
           }
         }
       }
@@ -272,7 +254,6 @@ export class ParticleEngine {
         }
       }
 
-      // Friction + integrate
       p.vx *= friction;
       p.vy *= friction;
       p.x += p.vx;
