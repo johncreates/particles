@@ -127,9 +127,8 @@ export class ParticleEngine {
   }
 
   addShockwave(x, y) {
-    const { spacingX, spacingY } = this._gridParams();
     const maxR = Math.max(this._W, this._H) * 0.75;
-    this.shockwaves.push({ x, y, t: 0, duration: 1.8, maxR });
+    this.shockwaves.push({ x, y, t: 0, duration: 1.8, maxR, strength: 1.0 });
   }
 
   addHotParticle(x, y) {
@@ -183,8 +182,8 @@ export class ParticleEngine {
     }
     for (const w of dyingWells) {
       const sizeFrac = w.lifespan / 60;
-      const maxR = Math.max(W, H) * (0.35 + 0.4 * sizeFrac);
-      this.shockwaves.push({ x: w.x, y: w.y, t: 0, duration: 1.8 + sizeFrac * 0.6, maxR });
+      const maxR = Math.max(W, H) * (0.06 + 0.09 * sizeFrac);
+      this.shockwaves.push({ x: w.x, y: w.y, t: 0, duration: 0.9 + sizeFrac * 0.4, maxR, strength: 0.15 });
     }
     this.wells = this.wells.filter(w => w.age < w.lifespan);
 
@@ -261,7 +260,7 @@ export class ParticleEngine {
         const gap = Math.abs(sd - s.r);
         if (gap < shockBand) {
           const falloff = 1 - gap / shockBand;
-          const force = 4000 * falloff;
+          const force = 4000 * falloff * (s.strength ?? 1.0);
           p.vx += ((p.x - s.x) / sd) * force * dt;
           p.vy += ((p.y - s.y) / sd) * force * dt;
         }
