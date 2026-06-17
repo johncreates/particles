@@ -1,0 +1,204 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #0e0d0c;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Gear toggle button */
+#settings-toggle {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  width: 36px;
+  height: 36px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  transition: background 0.15s;
+  color: #c4b8a8;
+}
+
+#settings-toggle:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+#settings-toggle svg {
+  width: 18px;
+  height: 18px;
+  transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+#settings-toggle.open svg {
+  transform: rotate(60deg);
+}
+
+/* Settings panel */
+#settings-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 270px;
+  height: 100%;
+  background: rgba(14, 13, 12, 0.92);
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  z-index: 99;
+  padding: 64px 22px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+  transform: translateX(100%);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow-y: auto;
+}
+
+#settings-panel.open {
+  transform: translateX(0);
+}
+
+.settings-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(196, 184, 168, 0.45);
+  margin-bottom: -14px;
+}
+
+.control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.control-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.control-label span:first-child {
+  font-size: 13px;
+  color: #c4b8a8;
+}
+
+.control-label .value-display {
+  font-size: 12px;
+  color: rgba(196, 184, 168, 0.5);
+  font-variant-numeric: tabular-nums;
+}
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 2px;
+  background: rgba(196, 184, 168, 0.18);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #c4b8a8;
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.25);
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #c4b8a8;
+  border: none;
+  cursor: pointer;
+}
+
+/* Segmented control for cloud size */
+.segmented {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.segmented input[type="radio"] {
+  display: none;
+}
+
+.segmented label {
+  text-align: center;
+  padding: 5px 0;
+  font-size: 12px;
+  color: rgba(196, 184, 168, 0.5);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  user-select: none;
+}
+
+.segmented input[type="radio"]:checked + label {
+  background: rgba(196, 184, 168, 0.15);
+  color: #c4b8a8;
+}
+
+/* Divider */
+.divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.07);
+  margin: -6px 0;
+}
+
+/* Re-roll button */
+#reroll-btn {
+  width: 100%;
+  padding: 9px;
+  background: rgba(196, 184, 168, 0.08);
+  border: 1px solid rgba(196, 184, 168, 0.15);
+  border-radius: 8px;
+  color: #c4b8a8;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s;
+  letter-spacing: 0.02em;
+}
+
+#reroll-btn:hover {
+  background: rgba(196, 184, 168, 0.14);
+}
+
+#reroll-btn:active {
+  background: rgba(196, 184, 168, 0.2);
+}
