@@ -169,6 +169,23 @@ input[type="range"]::-moz-range-thumb {
   color: #c4b8a8;
 }
 
+.segmented--icons {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.segmented--icons label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 0;
+  min-height: 32px;
+}
+
+.segmented--icons svg {
+  width: 18px;
+  height: 18px;
+}
+
 /* Divider */
 .divider {
   height: 1px;

@@ -26,6 +26,12 @@ export function initSettings(onChange) {
   bindSlider('size-slider', 'particleSize', v => v + 'px');
   bindSlider('reactivity-slider', 'reactivity', v => v + '%');
   bindSlider('idle-slider', 'idleEnergy', v => v + '%');
+  bindSlider('depth-slider', 'depthStrength', v => v + '%');
+
+  // ─── Grid shape selector ─────────────────────────────────────────────────
+  document.querySelectorAll('input[name="grid-shape"]').forEach(r => {
+    r.addEventListener('change', () => { if (r.checked) onChange('gridShape', r.value); });
+  });
 
   // ─── Cloud size segmented control ───────────────────────────────────────
   const sizeRadios = document.querySelectorAll('input[name="cloud-size"]');
