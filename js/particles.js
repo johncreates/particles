@@ -231,9 +231,12 @@ export class ParticleEngine {
       this.galaxyDust = this.galaxyDust.filter(d => d.wellId !== removed.id);
     } else if (this.wells.length < 5) {
       const wellId = Date.now() + Math.random();
+      const lifespan = 10 + Math.random() * 50;
+      // Galaxy cloud scale — wider orbit for longer-lived wells (1× → ~1.6×)
+      const galaxyScale = 1 + 0.6 * Math.max(0, (lifespan - 10) / 50);
       this.wells.push({
         x, y, age: 0,
-        lifespan: 10 + Math.random() * 50,
+        lifespan,
         spin: Math.random() < 0.5 ? 1 : -1,
         id: wellId,
         tiltAngle: Math.random() * Math.PI * 2,
@@ -241,10 +244,10 @@ export class ParticleEngine {
       });
       for (let i = 0; i < 50; i++) {
         const angle = Math.random() * Math.PI * 2;
-        const speed = 4 + Math.random() * 5;
+        const speed = (4 + Math.random() * 5) * galaxyScale;
         this.galaxyDust.push({
-          x: x + (Math.random() - 0.5) * 8,
-          y: y + (Math.random() - 0.5) * 8,
+          x: x + (Math.random() - 0.5) * 8 * galaxyScale,
+          y: y + (Math.random() - 0.5) * 8 * galaxyScale,
           vx: Math.cos(angle) * speed,
           vy: Math.sin(angle) * speed,
           wellId,
@@ -304,7 +307,7 @@ export class ParticleEngine {
     const connectionThreshold = shape === 'hex' ? hexP.hexSpacing * 1.25
       : shape === 'radial' ? radialP.radialSpacing * 1.3
       : Math.max(spacingX, spacingY) * 1.55;
-    const wellInfluence = Math.min(W, H) * 0.22;
+    const wellInfluenceBase = Math.min(W, H) * 0.22;
 
     const mx = this.mouse.x;
     const my = this.mouse.y;
@@ -352,8 +355,9 @@ export class ParticleEngine {
         // Home spring — suppressed near galaxy wells so particles can orbit freely
         let homeSpringMult = 1.0;
         for (const w of this.wells) {
+          const wInfluence = wellInfluenceBase * (1 + 0.5 * Math.max(0, (w.lifespan - 10) / 50));
           const _wd = Math.hypot(w.x - p.x, w.y - p.y);
-          if (_wd < wellInfluence) homeSpringMult = Math.min(homeSpringMult, _wd / wellInfluence);
+          if (_wd < wInfluence) homeSpringMult = Math.min(homeSpringMult, _wd / wInfluence);
         }
         p.vx += (p.homeX - p.x) * homeSpring * homeSpringMult;
         p.vy += (p.homeY - p.y) * homeSpring * homeSpringMult;
@@ -389,10 +393,11 @@ export class ParticleEngine {
 
       // Galaxy wells — radial capture + tangential spin
       for (const w of this.wells) {
+        const wInfluence = wellInfluenceBase * (1 + 0.5 * Math.max(0, (w.lifespan - 10) / 50));
         const wdx = w.x - p.x;
         const wdy = w.y - p.y;
         const wd = Math.hypot(wdx, wdy) || 0.001;
-        if (wd < wellInfluence) {
+        if (wd < wInfluence) {
           const effD = Math.max(wd, 22);
           const radialF = Math.min(galaxyRadial / (effD * effD), 0.7);
           p.vx += (wdx / wd) * radialF;
@@ -407,13 +412,15 @@ export class ParticleEngine {
       if (!p.hot) {
         let gT = 0;
         for (const w of this.wells) {
+          const wInfluence = wellInfluenceBase * (1 + 0.5 * Math.max(0, (w.lifespan - 10) / 50));
           const gwd = Math.hypot(w.x - p.x, w.y - p.y);
-          if (gwd < wellInfluence) gT = Math.max(gT, 1 - gwd / wellInfluence);
+          if (gwd < wInfluence) gT = Math.max(gT, 1 - gwd / wInfluence);
         }
         p._galaxyT = gT;
         for (const w of this.wells) {
+          const wInfluence = wellInfluenceBase * (1 + 0.5 * Math.max(0, (w.lifespan - 10) / 50));
           const wd = Math.hypot(w.x - p.x, w.y - p.y);
-          if (wd < wellInfluence) {
+          if (wd < wInfluence) {
             const tnx = Math.cos(w.tiltAngle);
             const tny = Math.sin(w.tiltAngle);
             const vDotN = p.vx * tnx + p.vy * tny;
@@ -649,7 +656,8 @@ export class ParticleEngine {
       const w = this.wells.find(ww => ww.id === d.wellId);
       if (!w) continue;
       const wd = Math.hypot(d.x - w.x, d.y - w.y);
-      const proximity = Math.max(0, 1 - wd / wellInfluence);
+      const wInfluence = wellInfluenceBase * (1 + 0.5 * Math.max(0, (w.lifespan - 10) / 50));
+      const proximity = Math.max(0, 1 - wd / wInfluence);
       const alpha = 0.35 + proximity * 0.55;
       ctx.beginPath();
       ctx.arc(d.x, d.y, d.size, 0, Math.PI * 2);
@@ -670,8 +678,8 @@ export class ParticleEngine {
     const pingT = 1.4;
 
     for (const w of this.wells) {
-      // Scale 1× (10s well) → 4× (60s well)
-      const scale = 1 + 3 * Math.max(0, (w.lifespan - 10) / 50);
+      // Scale 1× (10s well) → 3× (60s well)
+      const scale = 1 + 2 * Math.max(0, (w.lifespan - 10) / 50);
       const wPingR = 55 * scale;
       const arm = 9 * scale;
 
@@ -682,6 +690,13 @@ export class ParticleEngine {
       const cr = Math.round(196 + deathFrac * (220 - 196));
       const cg = Math.round(184 + deathFrac * (55 - 184));
       const cb = Math.round(168 + deathFrac * (55 - 168));
+
+      // Static territory ring — always visible, encodes well size at a glance
+      ctx.beginPath();
+      ctx.arc(w.x, w.y, wPingR, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(${cr},${cg},${cb},0.12)`;
+      ctx.lineWidth = 1;
+      ctx.stroke();
 
       for (let i = 0; i < 2; i++) {
         const phase = ((this.time + i * pingT / 2) % pingT) / pingT;
