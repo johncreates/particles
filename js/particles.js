@@ -28,6 +28,28 @@ export class ParticleEngine {
     this._tides = [];
     this._nextTideAt = 20;
 
+    // Comets
+    this.comets = [];
+    this._nextCometAt = 45 + Math.random() * 75;
+
+    // Background star field
+    this.bgStars = [];
+
+    // Nebula gas clouds
+    this.nebulae = [];
+
+    // Supernova effects
+    this.sparks = [];
+    this.flashes = [];
+
+    // Emergent constellations
+    this.constellations = [];
+    this._nextConstellationAt = 12;
+
+    // Attract / idle mode
+    this._idleTime = 0;
+    this._attractWellAt = 0;
+
     this._resize();
     this.spawnParticles();
 
@@ -213,6 +235,32 @@ export class ParticleEngine {
     }
   }
 
+  _spawnBgStars() {
+    const W = this._W, H = this._H;
+    this.bgStars = Array.from({ length: 80 }, () => ({
+      x: Math.random() * W,
+      y: Math.random() * H,
+      size: 0.4 + Math.random() * 0.5,
+      alpha: 0.10 + Math.random() * 0.24,
+    }));
+  }
+
+  _spawnNebulae() {
+    const W = this._W, H = this._H;
+    const palette = [[120, 60, 180], [40, 90, 170], [150, 50, 120], [40, 120, 140]]; // violet/indigo/magenta/teal
+    this.nebulae = Array.from({ length: 4 }, () => {
+      const c = palette[Math.floor(Math.random() * palette.length)];
+      return {
+        x: Math.random() * W, y: Math.random() * H,
+        r: Math.min(W, H) * (0.35 + Math.random() * 0.35),
+        cr: c[0], cg: c[1], cb: c[2],
+        maxA: 0.05 + Math.random() * 0.05,
+        driftSpeed: 2 + Math.random() * 4,
+        phase: Math.random() * Math.PI * 2,
+      };
+    });
+  }
+
   // ─── Canvas resize ────────────────────────────────────────────────────────
   _resize() {
     const dpr = this._dpr;
@@ -221,7 +269,27 @@ export class ParticleEngine {
     this.canvas.style.width = window.innerWidth + 'px';
     this.canvas.style.height = window.innerHeight + 'px';
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this._spawnBgStars();
+    this._spawnNebulae();
     if (this.particles.length) this._rehome();
+  }
+
+  // ─── Gravitational lensing — displace a point around wells ────────────────
+  _lensPoint(x, y) {
+    let dx = 0, dy = 0;
+    for (const w of this.wells) {
+      const rx = x - w.x, ry = y - w.y;
+      const d = Math.hypot(rx, ry) || 0.001;
+      const mass = 1 + 0.5 * Math.max(0, (w.lifespan - 10) / 50);
+      const reach = 200 * mass;
+      if (d > reach) continue;
+      const fade = 1 - d / reach;
+      const deflect = (mass * 1600) / (d + 50);
+      const sign = w.type === 'repulsor' ? -1 : 1;
+      dx += (rx / d) * deflect * fade * fade * sign;
+      dy += (ry / d) * deflect * fade * fade * sign;
+    }
+    return [x + dx, y + dy];
   }
 
   // ─── Public API ───────────────────────────────────────────────────────────
@@ -290,6 +358,24 @@ export class ParticleEngine {
     this.spawnParticles();
   }
 
+  noteInteraction() {
+    this._idleTime = 0;
+  }
+
+  exportPNG() {
+    const tmp = document.createElement('canvas');
+    tmp.width = this.canvas.width;
+    tmp.height = this.canvas.height;
+    const tctx = tmp.getContext('2d');
+    tctx.fillStyle = '#0e0d0c';
+    tctx.fillRect(0, 0, tmp.width, tmp.height);
+    tctx.drawImage(this.canvas, 0, 0);
+    const a = document.createElement('a');
+    a.href = tmp.toDataURL('image/png');
+    a.download = `cosmos-${Date.now()}.png`;
+    a.click();
+  }
+
   addShockwave(x, y) {
     const maxR = Math.max(this._W, this._H) * 0.75;
     this.shockwaves.push({ x, y, t: 0, duration: 1.8, maxR, strength: 1.0 });
@@ -333,6 +419,18 @@ export class ParticleEngine {
     const cosR = Math.cos(rotAng), sinR = Math.sin(rotAng);
     const rotCX = W / 2, rotCY = H / 2;
 
+    // ─── Attract / idle mode — cosmos plays itself after ~30s untouched ──
+    this._idleTime += dt;
+    const attract = this._idleTime > 30;
+    if (attract && this.time >= this._attractWellAt) {
+      if (this.wells.length < 4) {
+        const ax = W * (0.2 + Math.random() * 0.6);
+        const ay = H * (0.2 + Math.random() * 0.6);
+        this.toggleWell(ax, ay, Math.random() < 0.8 ? 'attractor' : 'repulsor');
+      }
+      this._attractWellAt = this.time + 6 + Math.random() * 8;
+    }
+
     // Spawn rare gravitational tides — broad, slow, no visible wavefront
     if (idleStrength > 0 && this.time >= this._nextTideAt) {
       const ang = Math.random() * Math.PI * 2;
@@ -345,6 +443,41 @@ export class ParticleEngine {
       this._nextTideAt = this.time + 15 + Math.random() * 30;
     }
     this._tides = this._tides.filter(t => this.time - t.born < t.life);
+
+    // ─── Spawn comets ────────────────────────────────────────────────────
+    if (this.time >= this._nextCometAt) {
+      const edge = Math.floor(Math.random() * 4);
+      let cx, cy;
+      if      (edge === 0) { cx = Math.random() * W; cy = -10; }
+      else if (edge === 1) { cx = W + 10; cy = Math.random() * H; }
+      else if (edge === 2) { cx = Math.random() * W; cy = H + 10; }
+      else                 { cx = -10; cy = Math.random() * H; }
+      const targetX = W * (0.3 + Math.random() * 0.4);
+      const targetY = H * (0.3 + Math.random() * 0.4);
+      const ang = Math.atan2(targetY - cy, targetX - cx) + (Math.random() - 0.5) * 0.4;
+      const speed = 2.5 + Math.random() * 2;
+      this.comets.push({ x: cx, y: cy, vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed, trail: [], age: 0, outAt: null });
+      this._nextCometAt = this.time + (attract ? 12 + Math.random() * 18 : 45 + Math.random() * 75);
+    }
+
+    // ─── Spawn emergent constellations ───────────────────────────────────
+    if (this.time >= this._nextConstellationAt) {
+      const pool = this.particles.filter(p => !p.hot);
+      if (pool.length > 6) {
+        const anchor = pool[Math.floor(Math.random() * pool.length)];
+        const near = pool
+          .map(p => ({ p, d: Math.hypot(p.homeX - anchor.homeX, p.homeY - anchor.homeY) }))
+          .filter(o => o.d < Math.min(W, H) * 0.18)
+          .sort((a, b) => a.d - b.d)
+          .slice(0, 5 + Math.floor(Math.random() * 2))
+          .map(o => o.p);
+        if (near.length >= 4) {
+          this.constellations.push({ pts: near, born: this.time, life: 7 + Math.random() * 4 });
+        }
+      }
+      this._nextConstellationAt = this.time + 15 + Math.random() * 20;
+    }
+    this.constellations = this.constellations.filter(c => this.time - c.born < c.life);
 
     const shape = this.config.gridShape;
     const gridP = shape === 'grid' ? this._gridParams() : null;
@@ -373,8 +506,24 @@ export class ParticleEngine {
     for (const w of dyingWells) {
       this.galaxyDust = this.galaxyDust.filter(d => d.wellId !== w.id);
       const sizeFrac = w.lifespan / 60;
-      const maxR = Math.max(W, H) * (0.06 + 0.09 * sizeFrac);
-      this.shockwaves.push({ x: w.x, y: w.y, t: 0, duration: 0.9 + sizeFrac * 0.4, maxR, strength: 0.15 });
+      if (w.lifespan > 40 && w.type === 'attractor') {
+        // SUPERNOVA — flash, spark burst, lingering remnant stars
+        this.flashes.push({ x: w.x, y: w.y, t: 0, duration: 0.6, maxR: 90 * (1 + sizeFrac) });
+        this.shockwaves.push({ x: w.x, y: w.y, t: 0, duration: 1.6, maxR: Math.max(W, H) * 0.6, strength: 2.0 });
+        for (let i = 0; i < 60; i++) {
+          const ang = Math.random() * Math.PI * 2;
+          const spd = 4 + Math.random() * 9;
+          this.sparks.push({ x: w.x, y: w.y, vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+            life: 0, maxLife: 1.0 + Math.random() * 1.0, size: 0.8 + Math.random() * 1.4 });
+        }
+        for (let i = 0; i < 6; i++) {
+          this.bgStars.push({ x: w.x + (Math.random() - 0.5) * 80, y: w.y + (Math.random() - 0.5) * 80,
+            size: 0.4 + Math.random() * 0.5, alpha: 0.12 + Math.random() * 0.2 });
+        }
+      } else {
+        const maxR = Math.max(W, H) * (0.06 + 0.09 * sizeFrac);
+        this.shockwaves.push({ x: w.x, y: w.y, t: 0, duration: 0.9 + sizeFrac * 0.4, maxR, strength: 0.15 });
+      }
     }
     this.wells = this.wells.filter(w => w.age < w.lifespan);
 
@@ -637,6 +786,62 @@ export class ParticleEngine {
 
     this.shockwaves = this.shockwaves.filter(s => s.t < s.duration);
 
+    // ─── Update comets ────────────────────────────────────────────────────
+    for (const c of this.comets) {
+      c.age += dt;
+      c.trail.push({ x: c.x, y: c.y });
+      if (c.trail.length > 60) c.trail.shift();
+      // Well influence (50% strength, wider capture radius)
+      for (const w of this.wells) {
+        const wdx = w.x - c.x, wdy = w.y - c.y;
+        const wd = Math.hypot(wdx, wdy) || 0.001;
+        const wInfluence = wellInfluenceBase * (1 + 0.5 * Math.max(0, (w.lifespan - 10) / 50));
+        if (wd < wInfluence * 1.5) {
+          const effD = Math.max(wd, 22);
+          const radialF = Math.min(galaxyRadial / (effD * effD), 0.7) * 0.5;
+          if (w.type === 'repulsor') {
+            c.vx -= (wdx / wd) * radialF;
+            c.vy -= (wdy / wd) * radialF;
+          } else {
+            c.vx += (wdx / wd) * radialF;
+            c.vy += (wdy / wd) * radialF;
+            const tangF = Math.min(galaxySpin / (effD * effD), 2.2) * 0.5;
+            c.vx += w.spin * (-wdy / wd) * tangF;
+            c.vy += w.spin * (wdx / wd) * tangF;
+          }
+        }
+      }
+      // Shockwave impulse
+      for (const s of this.shockwaves) {
+        const sd = Math.hypot(c.x - s.x, c.y - s.y) || 0.001;
+        const gap = Math.abs(sd - s.r);
+        if (gap < shockBand) {
+          const falloff = 1 - gap / shockBand;
+          c.vx += ((c.x - s.x) / sd) * 4000 * falloff * (s.strength ?? 1.0) * dt;
+          c.vy += ((c.y - s.y) / sd) * 4000 * falloff * (s.strength ?? 1.0) * dt;
+        }
+      }
+      c.vx *= 0.999;
+      c.vy *= 0.999;
+      c.x += c.vx;
+      c.y += c.vy;
+      const margin = 80;
+      if (!c.outAt && (c.x < -margin || c.x > W + margin || c.y < -margin || c.y > H + margin)) {
+        c.outAt = this.time;
+      }
+    }
+    this.comets = this.comets.filter(c => !c.outAt || this.time - c.outAt < 1.5);
+
+    // ─── Update supernova sparks + flashes ───────────────────────────────
+    for (const sp of this.sparks) {
+      sp.life += dt;
+      sp.vx *= 0.96; sp.vy *= 0.96;
+      sp.x += sp.vx; sp.y += sp.vy;
+    }
+    this.sparks = this.sparks.filter(sp => sp.life < sp.maxLife);
+    for (const f of this.flashes) f.t += dt;
+    this.flashes = this.flashes.filter(f => f.t < f.duration);
+
     // ─── Compute per-particle depth (centre = 1.0, edges scale with slider) ─
     {
       let gridCX, gridCY, gridMaxDist;
@@ -657,9 +862,33 @@ export class ParticleEngine {
       const s = this.config.depthStrength / 100;
       for (const p of this.particles) {
         const d = Math.hypot(p.homeX - gridCX, p.homeY - gridCY);
-        const rawDepth = Math.max(0.2, 1 - Math.pow(d / gridMaxDist, 1.6));
+        const tempT = Math.min(1, Math.pow(d / gridMaxDist, 1.6));
+        p._tempT = tempT;
+        const rawDepth = Math.max(0.2, 1 - tempT);
         p._depth = 1 - s * (1 - rawDepth);
       }
+    }
+
+    // ─── Draw nebula gas clouds (furthest back) ──────────────────────────
+    for (const nb of this.nebulae) {
+      const ox = Math.cos(this.time * 0.01 + nb.phase) * nb.driftSpeed * 6;
+      const oy = Math.sin(this.time * 0.008 + nb.phase) * nb.driftSpeed * 6;
+      const nx = nb.x + ox, ny = nb.y + oy;
+      const a = nb.maxA * (0.7 + 0.3 * Math.sin(this.time * 0.05 + nb.phase));
+      const g = ctx.createRadialGradient(nx, ny, 0, nx, ny, nb.r);
+      g.addColorStop(0, `rgba(${nb.cr},${nb.cg},${nb.cb},${a.toFixed(3)})`);
+      g.addColorStop(1, `rgba(${nb.cr},${nb.cg},${nb.cb},0)`);
+      ctx.fillStyle = g;
+      ctx.fillRect(nx - nb.r, ny - nb.r, nb.r * 2, nb.r * 2);
+    }
+
+    // ─── Draw background stars (lensed by wells) ─────────────────────────
+    for (const s of this.bgStars) {
+      const [sx, sy] = this._lensPoint(s.x, s.y);
+      ctx.beginPath();
+      ctx.arc(sx, sy, s.size, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(180,195,220,${s.alpha.toFixed(2)})`;
+      ctx.fill();
     }
 
     // ─── Draw low-poly quad fills (grid shape only) ───────────────────────
@@ -777,10 +1006,14 @@ export class ParticleEngine {
         if (isHot) {
           ctx.strokeStyle = `rgba(220,130,70,${alpha.toFixed(3)})`;
         } else {
+          const lineTT = ((a._tempT ?? 0.5) + (b._tempT ?? 0.5)) * 0.5;
+          const lBaseR = Math.round(220 + lineTT * (90  - 220));
+          const lBaseG = Math.round(155 + lineTT * (125 - 155));
+          const lBaseB = Math.round(80  + lineTT * (200 - 80 ));
           const lineGT = Math.max(a._galaxyT ?? 0, b._galaxyT ?? 0) * 0.6;
-          const lr = Math.round(196 + lineGT * (170 - 196));
-          const lg = Math.round(184 + lineGT * (50 - 184));
-          const lb = Math.round(168 + lineGT * (255 - 168));
+          const lr = Math.round(lBaseR + lineGT * (170 - lBaseR));
+          const lg = Math.round(lBaseG + lineGT * (50  - lBaseG));
+          const lb = Math.round(lBaseB + lineGT * (255 - lBaseB));
           ctx.strokeStyle = `rgba(${lr},${lg},${lb},${alpha.toFixed(3)})`;
         }
         ctx.lineWidth = isHot ? 0.5 : 0.5 * dep;
@@ -788,16 +1021,40 @@ export class ParticleEngine {
       }
     }
 
+    // ─── Draw emergent constellations ────────────────────────────────────
+    for (const con of this.constellations) {
+      const env = Math.sin(Math.PI * (this.time - con.born) / con.life);
+      const a = env * 0.5;
+      ctx.strokeStyle = `rgba(235,228,210,${a.toFixed(3)})`;
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.moveTo(con.pts[0].x, con.pts[0].y);
+      for (let i = 1; i < con.pts.length; i++) ctx.lineTo(con.pts[i].x, con.pts[i].y);
+      ctx.stroke();
+      for (const p of con.pts) {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 1.6, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(245,240,225,${(env * 0.8).toFixed(2)})`;
+        ctx.fill();
+      }
+    }
+
     // ─── Draw grey particles ─────────────────────────────────────────────
     for (const p of this.particles) {
       if (p.hot) continue;
       const dep = p._depth;
+      const tT = p._tempT ?? 0.5;
+      const baseR = Math.round(220 + tT * (90  - 220));
+      const baseG = Math.round(155 + tT * (125 - 155));
+      const baseB = Math.round(80  + tT * (200 - 80 ));
       const gT = p._galaxyT ?? 0;
-      const r = Math.round(196 + gT * (170 - 196));
-      const g = Math.round(184 + gT * (50 - 184));
-      const b = Math.round(168 + gT * (255 - 168));
+      const r = Math.round(baseR + gT * (170 - baseR));
+      const g = Math.round(baseG + gT * (50  - baseG));
+      const b = Math.round(baseB + gT * (255 - baseB));
+      const f1 = 0.018 + (p.phaseX / (Math.PI * 2)) * 0.010;
+      const breathe = Math.sin(this.time * f1 + p.phaseX) * 0.5;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, p.size * dep, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, Math.max(0.3, (p.size + breathe) * dep), 0, Math.PI * 2);
       ctx.fillStyle = `rgba(${r},${g},${b},${dep.toFixed(2)})`;
       ctx.fill();
     }
@@ -813,6 +1070,41 @@ export class ParticleEngine {
       ctx.beginPath();
       ctx.arc(d.x, d.y, d.size, 0, Math.PI * 2);
       ctx.fillStyle = `rgba(170,50,255,${alpha.toFixed(2)})`;
+      ctx.fill();
+    }
+
+    // ─── Draw comets ─────────────────────────────────────────────────────
+    for (const c of this.comets) {
+      const n = c.trail.length;
+      for (let i = 0; i < n; i++) {
+        const pt = c.trail[i];
+        const t = i / Math.max(n - 1, 1);
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, 0.4 + t * 1.8, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(220,210,255,${(t * 0.55).toFixed(2)})`;
+        ctx.fill();
+      }
+      // Soft glow
+      const grad = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, 7);
+      grad.addColorStop(0, 'rgba(200,185,255,0.45)');
+      grad.addColorStop(1, 'rgba(200,185,255,0)');
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, 7, 0, Math.PI * 2);
+      ctx.fillStyle = grad;
+      ctx.fill();
+      // Head
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, 2.2, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(235,230,255,0.95)';
+      ctx.fill();
+    }
+
+    // ─── Draw supernova sparks (white → amber, fading) ───────────────────
+    for (const sp of this.sparks) {
+      const k = 1 - sp.life / sp.maxLife;
+      ctx.beginPath();
+      ctx.arc(sp.x, sp.y, sp.size * k, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255,${Math.round(200 + 55 * k)},${Math.round(120 * k)},${(k * 0.9).toFixed(2)})`;
       ctx.fill();
     }
 
@@ -885,6 +1177,17 @@ export class ParticleEngine {
       ctx.arc(w.x, w.y, 2.5 * scale, 0, Math.PI * 2);
       ctx.fillStyle = `rgba(${cr},${cg},${cb},0.75)`;
       ctx.fill();
+    }
+
+    // ─── Draw supernova flashes (brightest, on top) ──────────────────────
+    for (const f of this.flashes) {
+      const k = 1 - f.t / f.duration;
+      const r = f.maxR * (1 - k * 0.3);
+      const g = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, r);
+      g.addColorStop(0, `rgba(255,250,235,${(k * 0.9).toFixed(2)})`);
+      g.addColorStop(1, 'rgba(255,250,235,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(f.x - r, f.y - r, r * 2, r * 2);
     }
   }
 

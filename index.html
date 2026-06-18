@@ -52,6 +52,24 @@
 
     <div class="control-group">
       <div class="control-label">
+        <span>Speed</span>
+      </div>
+      <div class="segmented segmented--5">
+        <input type="radio" name="speed" id="sp-025" value="0.25" />
+        <label for="sp-025">¼×</label>
+        <input type="radio" name="speed" id="sp-05" value="0.5" />
+        <label for="sp-05">½×</label>
+        <input type="radio" name="speed" id="sp-1" value="1" checked />
+        <label for="sp-1">1×</label>
+        <input type="radio" name="speed" id="sp-2" value="2" />
+        <label for="sp-2">2×</label>
+        <input type="radio" name="speed" id="sp-4" value="4" />
+        <label for="sp-4">4×</label>
+      </div>
+    </div>
+
+    <div class="control-group">
+      <div class="control-label">
         <span>Idle energy</span>
         <span class="value-display" id="idle-slider-val">5%</span>
       </div>
@@ -128,6 +146,7 @@
     </div>
 
     <button id="reroll-btn">Re-roll wave</button>
+    <button id="export-btn">Save image</button>
 
   </aside>
 

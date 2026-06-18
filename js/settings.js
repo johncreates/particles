@@ -46,6 +46,16 @@ export function initSettings(onChange) {
     onChange('reroll', null);
   });
 
+  // ─── Save image button ─────────────────────────────────────────────────────
+  document.getElementById('export-btn').addEventListener('click', () => {
+    onChange('export', null);
+  });
+
+  // ─── Speed dial ───────────────────────────────────────────────────────────
+  document.querySelectorAll('input[name="speed"]').forEach(r => {
+    r.addEventListener('change', () => { if (r.checked) onChange('speed', Number(r.value)); });
+  });
+
   // ─── Preset buttons ───────────────────────────────────────────────────────
   document.querySelectorAll('.preset-btn').forEach(btn => {
     btn.addEventListener('click', () => onChange('preset', btn.dataset.preset));

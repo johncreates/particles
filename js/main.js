@@ -37,9 +37,19 @@ function parseHash() {
   return cfg;
 }
 
+// ─── Speed dial ──────────────────────────────────────────────────────────
+let speedMult = 1;
+
 // ─── Settings ────────────────────────────────────────────────────────────
 const { syncUI } = initSettings((key, value) => {
-  if (key === 'reroll') {
+  engine.noteInteraction();
+  if (key === 'export') {
+    engine.exportPNG();
+    return;
+  } else if (key === 'speed') {
+    speedMult = value;
+    return;
+  } else if (key === 'reroll') {
     engine.rerollBlob();
   } else if (key === 'preset') {
     engine.applyConfig(PRESETS[value]);
@@ -63,8 +73,9 @@ writeHash(engine.config);
 canvas.addEventListener('mousemove', e => {
   engine.mouse.x = e.clientX;
   engine.mouse.y = e.clientY;
+  engine.noteInteraction();
 });
-canvas.addEventListener('mousedown', () => { engine.mouse.down = true; });
+canvas.addEventListener('mousedown', () => { engine.mouse.down = true; engine.noteInteraction(); });
 canvas.addEventListener('mouseup', () => { engine.mouse.down = false; });
 canvas.addEventListener('mouseleave', () => {
   engine.mouse.x = -9999;
@@ -78,12 +89,14 @@ canvas.addEventListener('touchmove', e => {
   const t = e.touches[0];
   engine.mouse.x = t.clientX;
   engine.mouse.y = t.clientY;
+  engine.noteInteraction();
 }, { passive: false });
 canvas.addEventListener('touchstart', e => {
   engine.mouse.down = true;
   const t = e.touches[0];
   engine.mouse.x = t.clientX;
   engine.mouse.y = t.clientY;
+  engine.noteInteraction();
 }, { passive: true });
 canvas.addEventListener('touchend', () => {
   engine.mouse.down = false;
@@ -118,7 +131,7 @@ let last = null;
 function loop(ts) {
   const dt = last === null ? 0.016 : Math.min((ts - last) / 1000, 0.05);
   last = ts;
-  engine.tick(dt);
+  engine.tick(dt * speedMult);
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);

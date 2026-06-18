@@ -173,6 +173,10 @@ input[type="range"]::-moz-range-thumb {
   grid-template-columns: repeat(3, 1fr);
 }
 
+.segmented--5 {
+  grid-template-columns: repeat(5, 1fr);
+}
+
 .segmented--icons label {
   display: flex;
   align-items: center;
@@ -222,8 +226,9 @@ input[type="range"]::-moz-range-thumb {
   background: rgba(196, 184, 168, 0.2);
 }
 
-/* Re-roll button */
-#reroll-btn {
+/* Re-roll + Save buttons */
+#reroll-btn,
+#export-btn {
   width: 100%;
   padding: 9px;
   background: rgba(196, 184, 168, 0.08);
@@ -236,11 +241,13 @@ input[type="range"]::-moz-range-thumb {
   letter-spacing: 0.02em;
 }
 
-#reroll-btn:hover {
+#reroll-btn:hover,
+#export-btn:hover {
   background: rgba(196, 184, 168, 0.14);
 }
 
-#reroll-btn:active {
+#reroll-btn:active,
+#export-btn:active {
   background: rgba(196, 184, 168, 0.2);
 }
 
