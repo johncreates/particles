@@ -274,6 +274,16 @@ export class ParticleEngine {
 
     this.shockwaves = this.shockwaves.filter(s => s.t < s.duration);
 
+    // ─── Compute per-particle depth (centre = 1.0, corners ≈ 0.45) ───────
+    {
+      const cx = W / 2, cy = H / 2;
+      const maxDist = Math.hypot(cx, cy);
+      for (const p of this.particles) {
+        const d = Math.hypot(p.homeX - cx, p.homeY - cy);
+        p._depth = Math.max(0.45, 1 - 0.5 * Math.pow(d / maxDist, 1.6));
+      }
+    }
+
     // ─── Draw low-poly quad fills ─────────────────────────────────────────
     {
       const { cols, rows } = this._gridParams();
@@ -319,12 +329,14 @@ export class ParticleEngine {
           }
           const neighborAvg = neighborCount > 0 ? neighborSum / neighborCount : 0;
           const boost = 1 + neighborAvg * 1.8;
-          const alpha = Math.min(quadS * 0.05 * boost, 0.13);
 
           const a = gmap.get(col * 10000 + row);
           const b = gmap.get((col + 1) * 10000 + row);
           const c = gmap.get(col * 10000 + (row + 1));
           const d = gmap.get((col + 1) * 10000 + (row + 1));
+
+          const quadDep = (a._depth + b._depth + c._depth + d._depth) * 0.25;
+          const alpha = Math.min(quadS * 0.05 * boost * quadDep, 0.13);
 
           ctx.beginPath();
           ctx.moveTo(a.x, a.y);
@@ -379,24 +391,26 @@ export class ParticleEngine {
         const threshold = isHot ? connectionThreshold * 1.9 : connectionThreshold;
         if (d >= threshold) continue;
         const flicker = 0.55 + 0.45 * Math.sin(this.time * 6.5 + a.phaseX + b.phaseX);
-        const alpha = (1 - d / threshold) * (isHot ? 0.35 : 0.5) * flicker;
+        const dep = isHot ? 1.0 : (a._depth + b._depth) * 0.5;
+        const alpha = (1 - d / threshold) * (isHot ? 0.35 : 0.5) * flicker * dep;
         ctx.beginPath();
         ctx.moveTo(a.x, a.y);
         ctx.lineTo(b.x, b.y);
         ctx.strokeStyle = isHot
           ? `rgba(220,130,70,${alpha.toFixed(3)})`
           : `rgba(196,184,168,${alpha.toFixed(3)})`;
-        ctx.lineWidth = 0.5;
+        ctx.lineWidth = isHot ? 0.5 : 0.5 * dep;
         ctx.stroke();
       }
     }
 
     // ─── Draw grey particles ─────────────────────────────────────────────
-    ctx.fillStyle = '#c4b8a8';
     for (const p of this.particles) {
       if (p.hot) continue;
+      const dep = p._depth;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, p.size * dep, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(196,184,168,${dep.toFixed(2)})`;
       ctx.fill();
     }
 
