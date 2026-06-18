@@ -24,6 +24,10 @@ export class ParticleEngine {
     // Default wave: left-to-right
     this._wave = { kX: 0.6, kY: 0.0, sX: 1.2, sY: 0.0 };
 
+    // Rare slow gravitational tides
+    this._tides = [];
+    this._nextTideAt = 20;
+
     this._resize();
     this.spawnParticles();
 
@@ -55,11 +59,25 @@ export class ParticleEngine {
     const marginFrac = { S: 0.25, M: 0.15, L: 0.07, XL: 0.02 }[this.config.cloudSize] ?? 0.15;
     const marginX = W * marginFrac, marginY = H * marginFrac;
     const gridW = W - 2 * marginX, gridH = H - 2 * marginY;
-    const hexSpacing = Math.sqrt(gridW * gridH * 2 / (this.config.count * Math.sqrt(3)));
-    const cols = Math.max(2, Math.round(gridW / hexSpacing) + 1);
+    const cx = W / 2, cy = H / 2;
+    // Flat-top hexagon (wider than tall) with apothem `a`, fit within the area
+    const a = Math.min(gridH / 2, gridW * Math.sqrt(3) / 4);
+    const halfW = 2 * a / Math.sqrt(3);              // centre → left/right vertex
+    // Spacing derived from hexagon area so particle count stays ~constant
+    const hexArea = 2 * Math.sqrt(3) * a * a;
+    const hexSpacing = Math.sqrt(hexArea * 2 / (this.config.count * Math.sqrt(3)));
     const hexSpacingY = hexSpacing * Math.sqrt(3) / 2;
-    const rows = Math.max(2, Math.round(gridH / hexSpacingY) + 1);
-    return { cols, rows, hexSpacing, hexSpacingY, marginX, marginY };
+    // Lattice big enough to cover the hexagon's bounding box (+pad for filtering)
+    const cols = Math.max(2, Math.round((2 * halfW) / hexSpacing) + 2);
+    const rows = Math.max(2, Math.round((2 * a) / hexSpacingY) + 2);
+    return { cols, rows, hexSpacing, hexSpacingY, cx, cy, a, halfW };
+  }
+
+  // Flat-top hexagon membership test (apothem a, centred at cx,cy)
+  _inHex(px, py, cx, cy, a) {
+    const X = Math.abs(px - cx), Y = Math.abs(py - cy);
+    if (Y > a + 0.5) return false;
+    return (Math.sqrt(3) / 2) * X + 0.5 * Y <= a + 0.5;
   }
 
   _radialLayoutParams() {
@@ -104,11 +122,14 @@ export class ParticleEngine {
   }
 
   _spawnHex() {
-    const { cols, rows, hexSpacing, hexSpacingY, marginX, marginY } = this._hexLayoutParams();
+    const { cols, rows, hexSpacing, hexSpacingY, cx, cy, a } = this._hexLayoutParams();
+    const startX = cx - ((cols - 1) * hexSpacing) / 2;
+    const startY = cy - ((rows - 1) * hexSpacingY) / 2;
     for (let row = 0; row < rows; row++) {
       for (let col = 0; col < cols; col++) {
-        const x = marginX + col * hexSpacing + (row % 2) * hexSpacing / 2;
-        const y = marginY + row * hexSpacingY;
+        const x = startX + col * hexSpacing + (row % 2) * hexSpacing / 2;
+        const y = startY + row * hexSpacingY;
+        if (!this._inHex(x, y, cx, cy, a)) continue;
         this.particles.push({
           x, y, homeX: x, homeY: y,
           col, row,
@@ -157,11 +178,13 @@ export class ParticleEngine {
   _rehome() {
     const shape = this.config.gridShape;
     if (shape === 'hex') {
-      const { hexSpacing, hexSpacingY, marginX, marginY } = this._hexLayoutParams();
+      const { cols, rows, hexSpacing, hexSpacingY, cx, cy } = this._hexLayoutParams();
+      const startX = cx - ((cols - 1) * hexSpacing) / 2;
+      const startY = cy - ((rows - 1) * hexSpacingY) / 2;
       for (const p of this.particles) {
         if (p.hot) continue;
-        p.homeX = marginX + p.col * hexSpacing + (p.row % 2) * hexSpacing / 2;
-        p.homeY = marginY + p.row * hexSpacingY;
+        p.homeX = startX + p.col * hexSpacing + (p.row % 2) * hexSpacing / 2;
+        p.homeY = startY + p.row * hexSpacingY;
         p.x = p.homeX; p.y = p.homeY; p.vx = 0; p.vy = 0;
       }
     } else if (shape === 'radial') {
@@ -224,7 +247,7 @@ export class ParticleEngine {
     this._wave = dirs[Math.floor(Math.random() * dirs.length)];
   }
 
-  toggleWell(x, y) {
+  toggleWell(x, y, type = 'attractor') {
     const hitIdx = this.wells.findIndex(w => Math.hypot(w.x - x, w.y - y) < 28);
     if (hitIdx !== -1) {
       const removed = this.wells.splice(hitIdx, 1)[0];
@@ -232,31 +255,39 @@ export class ParticleEngine {
     } else if (this.wells.length < 5) {
       const wellId = Date.now() + Math.random();
       const lifespan = 10 + Math.random() * 50;
-      // Galaxy cloud scale — wider orbit for longer-lived wells (1× → ~1.6×)
-      const galaxyScale = 1 + 0.6 * Math.max(0, (lifespan - 10) / 50);
       this.wells.push({
         x, y, age: 0,
         lifespan,
+        type,
         spin: Math.random() < 0.5 ? 1 : -1,
         id: wellId,
         tiltAngle: Math.random() * Math.PI * 2,
         tiltSpeed: (0.12 + Math.random() * 0.25) * (Math.random() < 0.5 ? 1 : -1),
+        vx: 0, vy: 0,
       });
-      for (let i = 0; i < 50; i++) {
-        const angle = Math.random() * Math.PI * 2;
-        const speed = (4 + Math.random() * 5) * galaxyScale;
-        this.galaxyDust.push({
-          x: x + (Math.random() - 0.5) * 8 * galaxyScale,
-          y: y + (Math.random() - 0.5) * 8 * galaxyScale,
-          vx: Math.cos(angle) * speed,
-          vy: Math.sin(angle) * speed,
-          wellId,
-          size: 0.6 + Math.random() * 0.7,
-          phaseX: Math.random() * Math.PI * 2,
-          phaseY: Math.random() * Math.PI * 2,
-        });
+      if (type === 'attractor') {
+        const galaxyScale = 1 + 0.6 * Math.max(0, (lifespan - 10) / 50);
+        for (let i = 0; i < 50; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = (4 + Math.random() * 5) * galaxyScale;
+          this.galaxyDust.push({
+            x: x + (Math.random() - 0.5) * 8 * galaxyScale,
+            y: y + (Math.random() - 0.5) * 8 * galaxyScale,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            wellId,
+            size: 0.6 + Math.random() * 0.7,
+            phaseX: Math.random() * Math.PI * 2,
+            phaseY: Math.random() * Math.PI * 2,
+          });
+        }
       }
     }
+  }
+
+  applyConfig(cfg) {
+    Object.assign(this.config, cfg);
+    this.spawnParticles();
   }
 
   addShockwave(x, y) {
@@ -297,6 +328,23 @@ export class ParticleEngine {
     const galaxySpin   = 540;
     const shockBand = 30;
     const agitateR = 45;
+    // Slow grid rotation — one full revolution every ~8 minutes
+    const rotAng = this.time * 0.013;
+    const cosR = Math.cos(rotAng), sinR = Math.sin(rotAng);
+    const rotCX = W / 2, rotCY = H / 2;
+
+    // Spawn rare gravitational tides — broad, slow, no visible wavefront
+    if (idleStrength > 0 && this.time >= this._nextTideAt) {
+      const ang = Math.random() * Math.PI * 2;
+      this._tides.push({
+        dirX: Math.cos(ang), dirY: Math.sin(ang),
+        born: this.time,
+        life: 10 + Math.random() * 15,
+        amp: 0.5 + Math.random() * 0.7,
+      });
+      this._nextTideAt = this.time + 15 + Math.random() * 30;
+    }
+    this._tides = this._tides.filter(t => this.time - t.born < t.life);
 
     const shape = this.config.gridShape;
     const gridP = shape === 'grid' ? this._gridParams() : null;
@@ -330,6 +378,90 @@ export class ParticleEngine {
     }
     this.wells = this.wells.filter(w => w.age < w.lifespan);
 
+    // ─── Well drift + plane rotation ─────────────────────────────────────
+    if (this.wells.length > 0) {
+      // Accumulate inter-well gravity (smaller wells pulled harder by larger ones)
+      const accX = new Float32Array(this.wells.length);
+      const accY = new Float32Array(this.wells.length);
+      for (let i = 0; i < this.wells.length; i++) {
+        for (let j = 0; j < this.wells.length; j++) {
+          if (i === j) continue;
+          const wi = this.wells[i], wj = this.wells[j];
+          const dx = wj.x - wi.x, dy = wj.y - wi.y;
+          const d = Math.hypot(dx, dy) || 0.001;
+          if (d < 60) continue;
+          const acc = 0.3 * (wj.lifespan / wi.lifespan) / d;
+          accX[i] += (dx / d) * acc;
+          accY[i] += (dy / d) * acc;
+        }
+      }
+      for (let i = 0; i < this.wells.length; i++) {
+        const w = this.wells[i];
+        w.vx = (w.vx + accX[i]) * 0.97;
+        w.vy = (w.vy + accY[i]) * 0.97;
+        w.x += w.vx;
+        w.y += w.vy;
+      }
+      // Rotate with the particle plane
+      const dRot = 0.013 * dt;
+      const cosW = Math.cos(dRot), sinW = Math.sin(dRot);
+      for (const w of this.wells) {
+        const dx = w.x - rotCX, dy = w.y - rotCY;
+        w.x = rotCX + dx * cosW - dy * sinW;
+        w.y = rotCY + dx * sinW + dy * cosW;
+      }
+    }
+
+    // ─── Well merge / annihilation ───────────────────────────────────────
+    if (this.wells.length > 1) {
+      const toRemove = new Set();
+      const toAdd = [];
+      for (let i = 0; i < this.wells.length; i++) {
+        for (let j = i + 1; j < this.wells.length; j++) {
+          const a = this.wells[i], b = this.wells[j];
+          if (toRemove.has(a.id) || toRemove.has(b.id)) continue;
+          if (Math.hypot(a.x - b.x, a.y - b.y) > 40) continue;
+          if (a.type !== b.type) {
+            // Annihilation — big shockwave, both gone
+            const maxR = Math.max(W, H) * 0.55;
+            this.shockwaves.push({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, t: 0, duration: 1.4, maxR, strength: 2.5 });
+          } else {
+            // Merge — weighted by remaining lifespan
+            const aRemain = a.lifespan - a.age;
+            const bRemain = b.lifespan - b.age;
+            const total = aRemain + bRemain;
+            const wA = aRemain / total;
+            const newId = Date.now() + Math.random();
+            const newLifespan = Math.min(total, 60);
+            const heavier = aRemain >= bRemain ? a : b;
+            const merged = {
+              x: a.x * wA + b.x * (1 - wA),
+              y: a.y * wA + b.y * (1 - wA),
+              age: 0, lifespan: newLifespan, type: a.type,
+              spin: heavier.spin, id: newId,
+              tiltAngle: heavier.tiltAngle,
+              tiltSpeed: heavier.tiltSpeed,
+              vx: a.vx * wA + b.vx * (1 - wA),
+              vy: a.vy * wA + b.vy * (1 - wA),
+            };
+            toAdd.push(merged);
+            // Reassign galaxy dust from both wells to the merged well
+            for (const d of this.galaxyDust) {
+              if (d.wellId === a.id || d.wellId === b.id) d.wellId = newId;
+            }
+            this.shockwaves.push({ x: merged.x, y: merged.y, t: 0, duration: 1.0, maxR: Math.max(W, H) * 0.2, strength: 1.0 });
+          }
+          toRemove.add(a.id);
+          toRemove.add(b.id);
+        }
+      }
+      if (toRemove.size > 0) {
+        this.wells = this.wells.filter(w => !toRemove.has(w.id)).concat(toAdd);
+        // Remove dust orphaned by annihilation
+        this.galaxyDust = this.galaxyDust.filter(d => this.wells.some(w => w.id === d.wellId));
+      }
+    }
+
     // ─── Advance shockwaves ──────────────────────────────────────────────
     for (const s of this.shockwaves) {
       s.t = Math.min(s.t + dt, s.duration);
@@ -352,22 +484,35 @@ export class ParticleEngine {
           p.vy += (H / 2 - p.y) * 0.002;
         }
       } else {
-        // Home spring — suppressed near galaxy wells so particles can orbit freely
+        // Home spring — suppressed near attractors so particles can orbit freely
         let homeSpringMult = 1.0;
         for (const w of this.wells) {
+          if (w.type === 'repulsor') continue;
           const wInfluence = wellInfluenceBase * (1 + 0.5 * Math.max(0, (w.lifespan - 10) / 50));
           const _wd = Math.hypot(w.x - p.x, w.y - p.y);
           if (_wd < wInfluence) homeSpringMult = Math.min(homeSpringMult, _wd / wInfluence);
         }
-        p.vx += (p.homeX - p.x) * homeSpring * homeSpringMult;
-        p.vy += (p.homeY - p.y) * homeSpring * homeSpringMult;
+        const hdx = p.homeX - rotCX, hdy = p.homeY - rotCY;
+        const rotHomeX = rotCX + hdx * cosR - hdy * sinR;
+        const rotHomeY = rotCY + hdx * sinR + hdy * cosR;
+        p.vx += (rotHomeX - p.x) * homeSpring * homeSpringMult;
+        p.vy += (rotHomeY - p.y) * homeSpring * homeSpringMult;
 
-        // Traveling wave idle
-        const wavePhase = p.col * this._wave.kX + p.row * this._wave.kY
-                        - this.time * (this._wave.sX + this._wave.sY);
         const waveAmp = idleStrength * 3;
-        p.vy += Math.sin(wavePhase) * waveAmp;
-        p.vx += Math.sin(wavePhase + 0.6) * waveAmp * 0.25;
+
+        // Slow personal cosmic drift — unique long-period ellipse per particle (~40–85s)
+        const f1 = 0.018 + (p.phaseX / (Math.PI * 2)) * 0.010;
+        const f2 = 0.013 + (p.phaseY / (Math.PI * 2)) * 0.008;
+        p.vx += Math.cos(this.time * f1 + p.phaseX) * waveAmp * 1.4;
+        p.vy += Math.sin(this.time * f2 + p.phaseY) * waveAmp * 1.4;
+
+        // Rare gravitational tides — broad slow pushes, no wavefront
+        for (const t of this._tides) {
+          const age = this.time - t.born;
+          const env = Math.sin(Math.PI * age / t.life);
+          p.vx += t.dirX * env * t.amp * waveAmp * 1.2;
+          p.vy += t.dirY * env * t.amp * waveAmp * 1.2;
+        }
 
         // Agitation from nearby hot particles
         for (const h of hotParticles) {
@@ -391,7 +536,7 @@ export class ParticleEngine {
         p.vy += sign * (ddy / dist) * force;
       }
 
-      // Galaxy wells — radial capture + tangential spin
+      // Galaxy wells — radial capture + tangential spin (attractors) or radial push (repulsors)
       for (const w of this.wells) {
         const wInfluence = wellInfluenceBase * (1 + 0.5 * Math.max(0, (w.lifespan - 10) / 50));
         const wdx = w.x - p.x;
@@ -400,24 +545,31 @@ export class ParticleEngine {
         if (wd < wInfluence) {
           const effD = Math.max(wd, 22);
           const radialF = Math.min(galaxyRadial / (effD * effD), 0.7);
-          p.vx += (wdx / wd) * radialF;
-          p.vy += (wdy / wd) * radialF;
-          const tangF = Math.min(galaxySpin / (effD * effD), 2.2);
-          p.vx += w.spin * (-wdy / wd) * tangF;
-          p.vy += w.spin * (wdx / wd) * tangF;
+          if (w.type === 'repulsor') {
+            p.vx -= (wdx / wd) * radialF;
+            p.vy -= (wdy / wd) * radialF;
+          } else {
+            p.vx += (wdx / wd) * radialF;
+            p.vy += (wdy / wd) * radialF;
+            const tangF = Math.min(galaxySpin / (effD * effD), 2.2);
+            p.vx += w.spin * (-wdy / wd) * tangF;
+            p.vy += w.spin * (wdx / wd) * tangF;
+          }
         }
       }
 
-      // Galaxy capture tint + tilt squash (non-hot only)
+      // Galaxy capture tint + tilt squash (attractors only, non-hot)
       if (!p.hot) {
         let gT = 0;
         for (const w of this.wells) {
+          if (w.type === 'repulsor') continue;
           const wInfluence = wellInfluenceBase * (1 + 0.5 * Math.max(0, (w.lifespan - 10) / 50));
           const gwd = Math.hypot(w.x - p.x, w.y - p.y);
           if (gwd < wInfluence) gT = Math.max(gT, 1 - gwd / wInfluence);
         }
         p._galaxyT = gT;
         for (const w of this.wells) {
+          if (w.type === 'repulsor') continue;
           const wInfluence = wellInfluenceBase * (1 + 0.5 * Math.max(0, (w.lifespan - 10) / 50));
           const wd = Math.hypot(w.x - p.x, w.y - p.y);
           if (wd < wInfluence) {
@@ -489,10 +641,9 @@ export class ParticleEngine {
     {
       let gridCX, gridCY, gridMaxDist;
       if (shape === 'hex') {
-        const { cols, rows, hexSpacing, hexSpacingY, marginX, marginY } = hexP;
-        gridCX = marginX + (cols - 1) * hexSpacing / 2;
-        gridCY = marginY + (rows - 1) * hexSpacingY / 2;
-        gridMaxDist = Math.hypot((cols - 1) * hexSpacing / 2, (rows - 1) * hexSpacingY / 2);
+        gridCX = hexP.cx;
+        gridCY = hexP.cy;
+        gridMaxDist = hexP.halfW;
       } else if (shape === 'radial') {
         gridCX = radialP.cx;
         gridCY = radialP.cy;
@@ -678,26 +829,33 @@ export class ParticleEngine {
     const pingT = 1.4;
 
     for (const w of this.wells) {
-      // Scale 1× (10s well) → 3× (60s well)
       const scale = 1 + 2 * Math.max(0, (w.lifespan - 10) / 50);
       const wPingR = 55 * scale;
       const arm = 9 * scale;
-
-      // deathFrac: 0 until last 30% of life, then ramps to 1
       const lifeProg = w.age / w.lifespan;
       const deathFrac = Math.max(0, (lifeProg - 0.7) / 0.3);
-      // Interpolate grey → red
-      const cr = Math.round(196 + deathFrac * (220 - 196));
-      const cg = Math.round(184 + deathFrac * (55 - 184));
-      const cb = Math.round(168 + deathFrac * (55 - 168));
 
-      // Static territory ring — always visible, encodes well size at a glance
+      let cr, cg, cb;
+      if (w.type === 'repulsor') {
+        // Amber → orange-red as it dies
+        cr = Math.round(220 + deathFrac * (220 - 220));
+        cg = Math.round(160 + deathFrac * (60 - 160));
+        cb = Math.round(40  + deathFrac * (40  - 40));
+      } else {
+        // Grey → red as it dies
+        cr = Math.round(196 + deathFrac * (220 - 196));
+        cg = Math.round(184 + deathFrac * (55  - 184));
+        cb = Math.round(168 + deathFrac * (55  - 168));
+      }
+
+      // Territory ring
       ctx.beginPath();
       ctx.arc(w.x, w.y, wPingR, 0, Math.PI * 2);
       ctx.strokeStyle = `rgba(${cr},${cg},${cb},0.12)`;
       ctx.lineWidth = 1;
       ctx.stroke();
 
+      // Ping rings
       for (let i = 0; i < 2; i++) {
         const phase = ((this.time + i * pingT / 2) % pingT) / pingT;
         const r = phase * wPingR;
@@ -709,11 +867,18 @@ export class ParticleEngine {
         ctx.stroke();
       }
 
+      // Crosshair icon — + for attractor, × for repulsor
       ctx.strokeStyle = `rgba(${cr},${cg},${cb},0.65)`;
       ctx.lineWidth = 0.9;
       ctx.beginPath();
-      ctx.moveTo(w.x - arm, w.y); ctx.lineTo(w.x + arm, w.y);
-      ctx.moveTo(w.x, w.y - arm); ctx.lineTo(w.x, w.y + arm);
+      if (w.type === 'repulsor') {
+        const d = arm * 0.707;
+        ctx.moveTo(w.x - d, w.y - d); ctx.lineTo(w.x + d, w.y + d);
+        ctx.moveTo(w.x + d, w.y - d); ctx.lineTo(w.x - d, w.y + d);
+      } else {
+        ctx.moveTo(w.x - arm, w.y); ctx.lineTo(w.x + arm, w.y);
+        ctx.moveTo(w.x, w.y - arm); ctx.lineTo(w.x, w.y + arm);
+      }
       ctx.stroke();
 
       ctx.beginPath();

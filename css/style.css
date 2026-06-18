@@ -193,6 +193,35 @@ input[type="range"]::-moz-range-thumb {
   margin: -6px 0;
 }
 
+/* Preset buttons */
+.preset-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.preset-btn {
+  padding: 7px 0;
+  background: rgba(196, 184, 168, 0.06);
+  border: 1px solid rgba(196, 184, 168, 0.12);
+  border-radius: 8px;
+  color: rgba(196, 184, 168, 0.7);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  letter-spacing: 0.02em;
+}
+
+.preset-btn:hover {
+  background: rgba(196, 184, 168, 0.13);
+  color: #c4b8a8;
+  border-color: rgba(196, 184, 168, 0.22);
+}
+
+.preset-btn:active {
+  background: rgba(196, 184, 168, 0.2);
+}
+
 /* Re-roll button */
 #reroll-btn {
   width: 100%;
